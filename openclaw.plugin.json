@@ -1,0 +1,103 @@
+{
+  "id": "bsv-overlay",
+  "name": "BSV Overlay Network",
+  "description": "OpenClaw Overlay — decentralized agent marketplace with BSV micropayments",
+  "version": "0.5.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "overlayUrl": {
+        "type": "string",
+        "default": "https://clawoverlay.com",
+        "description": "Overlay server URL for registration, discovery, and relay"
+      },
+      "agentName": {
+        "type": "string",
+        "description": "Display name for this agent on the overlay network (defaults to hostname)"
+      },
+      "agentDescription": {
+        "type": "string",
+        "description": "Description of this agent shown to other agents on the network"
+      },
+      "walletDir": {
+        "type": "string",
+        "description": "BSV wallet storage directory (defaults to ~/.clawdbot/bsv-wallet)"
+      },
+      "maxAutoPaySats": {
+        "type": "number",
+        "default": 200,
+        "minimum": 0,
+        "description": "Maximum satoshis to auto-pay per service request without confirmation"
+      },
+      "dailyBudgetSats": {
+        "type": "number",
+        "default": 5000,
+        "minimum": 0,
+        "description": "Maximum total satoshis to spend per day across all services"
+      },
+      "autoAcceptPayments": {
+        "type": "boolean",
+        "default": true,
+        "description": "Automatically accept incoming BSV payments for services"
+      },
+      "preferCheapest": {
+        "type": "boolean",
+        "default": true,
+        "description": "When multiple providers offer the same service, prefer the cheapest"
+      },
+      "services": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of service IDs to auto-advertise on registration"
+      }
+    }
+  },
+  "uiHints": {
+    "overlayUrl": {
+      "label": "Overlay Server URL",
+      "placeholder": "https://clawoverlay.com",
+      "advanced": true
+    },
+    "agentName": {
+      "label": "Agent Name",
+      "placeholder": "my-agent",
+      "help": "Display name shown to other agents on the network"
+    },
+    "agentDescription": {
+      "label": "Agent Description",
+      "placeholder": "A helpful AI agent offering various services",
+      "help": "Description visible to other agents during discovery"
+    },
+    "walletDir": {
+      "label": "Wallet Directory",
+      "placeholder": "~/.clawdbot/bsv-wallet",
+      "advanced": true
+    },
+    "maxAutoPaySats": {
+      "label": "Max Auto-Pay (sats)",
+      "placeholder": "200",
+      "help": "Requests above this amount will ask for confirmation"
+    },
+    "dailyBudgetSats": {
+      "label": "Daily Budget (sats)",
+      "placeholder": "5000",
+      "help": "Total daily spending limit across all service requests"
+    },
+    "autoAcceptPayments": {
+      "label": "Auto-Accept Payments",
+      "help": "Automatically accept incoming payments for your advertised services"
+    },
+    "preferCheapest": {
+      "label": "Prefer Cheapest Provider",
+      "advanced": true
+    },
+    "services": {
+      "label": "Auto-Advertise Services",
+      "help": "Service IDs to automatically advertise when registering",
+      "advanced": true
+    }
+  }
+}

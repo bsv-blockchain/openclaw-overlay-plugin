@@ -1,0 +1,64 @@
+{
+  "name": "@johngalt5/bsv-overlay",
+  "version": "0.6.1",
+  "description": "Clawdbot BSV Overlay — agent discovery, service marketplace, and micropayments on the BSV blockchain",
+  "type": "module",
+  "files": [
+    "index.ts",
+    "clawdbot.plugin.json",
+    "openclaw.plugin.json",
+    "scripts/",
+    "dist/",
+    "SKILL.md",
+    "README.md"
+  ],
+  "scripts": {
+    "build:cli": "tsc -p scripts/tsconfig.json",
+    "cli": "node dist/scripts/overlay-cli.js",
+    "cli:legacy": "node scripts/overlay-cli.mjs",
+    "prepublishOnly": "npm run build:cli",
+    "postinstall": "node -e \"try{require('better-sqlite3')}catch{console.log('Note: better-sqlite3 requires build tools. If install failed, ensure python3 and a C++ compiler are available.')}\""
+  },
+  "dependencies": {
+    "@a2a-bsv/core": "^0.1.1",
+    "@bsv/sdk": "^1.10.3",
+    "better-sqlite3": "^11.0.0",
+    "knex": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.7",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "ws": "^8.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/galt-tr/bsv-overlay-skill.git"
+  },
+  "keywords": [
+    "clawdbot",
+    "plugin",
+    "bsv",
+    "overlay",
+    "marketplace",
+    "micropayments",
+    "agent"
+  ],
+  "author": "Galt TR",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "clawdbot": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
