@@ -46,34 +46,26 @@ async function getSdk(): Promise<any> {
 }
 
 /**
- * Build a PUSHDATA script for OP_RETURN data.
- */
-function pushData(data: Uint8Array): Uint8Array {
-  const len = data.length;
-  if (len <= 75) {
-    return new Uint8Array([len, ...data]);
-  } else if (len <= 255) {
-    return new Uint8Array([0x4c, len, ...data]);
-  } else if (len <= 65535) {
-    return new Uint8Array([0x4d, len & 0xff, (len >> 8) & 0xff, ...data]);
-  }
-  throw new Error('Data too large for OP_RETURN');
-}
-
-/**
- * Build an OP_RETURN locking script with JSON payload.
+ * Build an OP_RETURN locking script with JSON payload using SDK's Script class.
  * 
  * Format: OP_FALSE OP_RETURN <"clawdbot-overlay-v1"> <JSON payload>
  * This matches the clawdbot-overlay server's expected format.
+ * 
+ * @param payload - The data to embed in the OP_RETURN
+ * @param sdk - The @bsv/sdk module
+ * @returns A proper Script object that the SDK can serialize
  */
-export function buildOpReturnScript(payload: OverlayPayload): Uint8Array {
-  const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
-  const opFalse = 0x00;
-  const opReturn = 0x6a;
-  // Use the correct protocol ID from config
-  const protocolBytes = pushData(new TextEncoder().encode(PROTOCOL_ID));
-  const payloadBytes = pushData(jsonBytes);
-  return new Uint8Array([opFalse, opReturn, ...protocolBytes, ...payloadBytes]);
+export function buildOpReturnScript(payload: OverlayPayload, sdk: any): any {
+  const protocolBytes = Array.from(new TextEncoder().encode(PROTOCOL_ID));
+  const jsonBytes = Array.from(new TextEncoder().encode(JSON.stringify(payload)));
+
+  const script = new sdk.Script();
+  script.writeOpCode(0x00);   // OP_FALSE
+  script.writeOpCode(0x6a);   // OP_RETURN
+  script.writeBin(protocolBytes);
+  script.writeBin(jsonBytes);
+
+  return script;
 }
 
 /**
@@ -154,6 +146,11 @@ export async function buildRealOverlayTransaction(
         if (!sourceTx) {
           throw new Error('BEEF tx object not found');
         }
+        // Attach merkle path from BEEF bumps if available
+        // This is required for SPV verification on the overlay server
+        if (beef.bumps && beef.bumps.length > 0 && !sourceTx.merklePath) {
+          sourceTx.merklePath = beef.bumps[0];
+        }
         sourceVout = suitableUtxo.tx_pos;
         inputSats = suitableUtxo.value;
       }
@@ -173,14 +170,17 @@ export async function buildRealOverlayTransaction(
   });
 
   // OP_RETURN output with 0 satoshis
-  const opReturnScript = buildOpReturnScript(payload);
+  const opReturnScript = buildOpReturnScript(payload, sdk);
   tx.addOutput({
-    lockingScript: { toBinary: () => Array.from(opReturnScript) },
+    lockingScript: opReturnScript,
     satoshis: OP_RETURN_SATS,
   });
 
   // Change output
-  const estimatedSize = 148 + 34 + opReturnScript.length + 34 + 10;
+  // Estimate script size: ~2 (opcodes) + ~20 (protocol) + payload JSON length
+  const payloadSize = JSON.stringify(payload).length;
+  const estimatedScriptSize = 2 + 1 + PROTOCOL_ID.length + 2 + payloadSize;
+  const estimatedSize = 148 + 34 + estimatedScriptSize + 34 + 10;
   const fee = Math.max(Math.ceil(estimatedSize / 1000), 1);
   const changeAmount = inputSats - OP_RETURN_SATS - fee;
 
