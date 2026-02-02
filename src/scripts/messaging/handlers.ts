@@ -41,39 +41,10 @@ async function getSdk(): Promise<any> {
   }
 }
 
-// Dynamic import for BSVAgentWallet
-let _BSVAgentWallet: any = null;
+import { BSVAgentWallet } from '../../core/index.js';
 
-async function getBSVAgentWallet(): Promise<any> {
-  if (_BSVAgentWallet) return _BSVAgentWallet;
-
-  try {
-    const core = await import('@a2a-bsv/core');
-    _BSVAgentWallet = core.BSVAgentWallet;
-    return _BSVAgentWallet;
-  } catch {
-    const { fileURLToPath } = await import('node:url');
-    const path = await import('node:path');
-    const os = await import('node:os');
-
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const candidates = [
-      path.resolve(__dirname, '..', '..', '..', 'node_modules', '@a2a-bsv', 'core', 'dist', 'index.js'),
-      path.resolve(__dirname, '..', '..', '..', '..', '..', 'a2a-bsv', 'packages', 'core', 'dist', 'index.js'),
-      path.resolve(os.homedir(), 'a2a-bsv', 'packages', 'core', 'dist', 'index.js'),
-    ];
-
-    for (const p of candidates) {
-      try {
-        const core = await import(p);
-        _BSVAgentWallet = core.BSVAgentWallet;
-        return _BSVAgentWallet;
-      } catch {
-        // Try next
-      }
-    }
-    throw new Error('Cannot find @a2a-bsv/core. Run setup.sh first.');
-  }
+async function getBSVAgentWallet(): Promise<typeof BSVAgentWallet> {
+  return BSVAgentWallet;
 }
 
 // Import NETWORK lazily to avoid circular dependencies
@@ -123,7 +94,7 @@ export async function verifyAndAcceptPayment(
 
   try {
     // First verify the payment structure
-    const verifyResult = wallet.verifyPayment({ beef: payment.beef });
+    const verifyResult = await wallet.verifyPayment({ beef: payment.beef });
     if (!verifyResult.valid) {
       await wallet.destroy();
       return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, outputIndex: 0, walletAccepted: false, error: `verification failed: ${verifyResult.errors.join(', ')}` };

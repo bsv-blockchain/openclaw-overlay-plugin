@@ -10,39 +10,10 @@ import { wocFetch, fetchBeefFromWoC, getExplorerBaseUrl } from '../utils/woc.js'
 import { buildMerklePathFromTSC } from '../utils/merkle.js';
 import { loadStoredChange, deleteStoredChange } from '../utils/storage.js';
 
-// Dynamic import for BSVAgentWallet
-let _BSVAgentWallet: any = null;
+import { BSVAgentWallet } from '../../core/index.js';
 
-async function getBSVAgentWallet(): Promise<any> {
-  if (_BSVAgentWallet) return _BSVAgentWallet;
-
-  try {
-    const core = await import('@a2a-bsv/core');
-    _BSVAgentWallet = core.BSVAgentWallet;
-    return _BSVAgentWallet;
-  } catch {
-    const { fileURLToPath } = await import('node:url');
-    const path = await import('node:path');
-    const os = await import('node:os');
-
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const candidates = [
-      path.resolve(__dirname, '..', '..', '..', 'node_modules', '@a2a-bsv', 'core', 'dist', 'index.js'),
-      path.resolve(__dirname, '..', '..', '..', '..', '..', 'a2a-bsv', 'packages', 'core', 'dist', 'index.js'),
-      path.resolve(os.homedir(), 'a2a-bsv', 'packages', 'core', 'dist', 'index.js'),
-    ];
-
-    for (const p of candidates) {
-      try {
-        const core = await import(p);
-        _BSVAgentWallet = core.BSVAgentWallet;
-        return _BSVAgentWallet;
-      } catch {
-        // Try next
-      }
-    }
-    throw new Error('Cannot find @a2a-bsv/core. Run setup.sh first.');
-  }
+async function getBSVAgentWallet(): Promise<typeof BSVAgentWallet> {
+  return BSVAgentWallet;
 }
 
 // Dynamic import for @bsv/sdk
@@ -228,7 +199,7 @@ export async function cmdImport(txidArg: string | undefined, voutStr?: string): 
 
   try {
     await wallet._setup.wallet.storage.internalizeAction({
-      tx: atomicBeefBytes!,
+      tx: Array.from(atomicBeefBytes!),
       outputs: [{
         outputIndex: vout,
         protocol: 'wallet payment',

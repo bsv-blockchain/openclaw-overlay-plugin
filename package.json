@@ -7,19 +7,21 @@
     "index.ts",
     "clawdbot.plugin.json",
     "openclaw.plugin.json",
-    "scripts/",
+    "src/",
     "dist/",
     "SKILL.md",
     "README.md"
   ],
+  "bin": {
+    "bsv-overlay": "dist/cli.js"
+  },
   "scripts": {
-    "build": "tsc -p scripts/tsconfig.json",
-    "cli": "node dist/scripts/overlay-cli.js",
-    "lint": "eslint scripts/**/*.ts",
+    "build": "tsc",
+    "cli": "node dist/cli.js",
+    "lint": "eslint src/**/*.ts",
     "postinstall": "node -e \"try{require('better-sqlite3')}catch{console.log('Note: better-sqlite3 requires build tools. If install failed, ensure python3 and a C++ compiler are available.')}\""
   },
   "dependencies": {
-    "@a2a-bsv/core": "^0.1.1",
     "@bsv/sdk": "^1.10.3",
     "@bsv/wallet-toolbox": "^1.7.22",
     "better-sqlite3": "^11.0.0",
