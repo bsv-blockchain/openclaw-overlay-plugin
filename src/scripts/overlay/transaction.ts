@@ -146,11 +146,6 @@ export async function buildRealOverlayTransaction(
         if (!sourceTx) {
           throw new Error('BEEF tx object not found');
         }
-        // Attach merkle path from BEEF bumps if available
-        // This is required for SPV verification on the overlay server
-        if (beef.bumps && beef.bumps.length > 0 && !sourceTx.merklePath) {
-          sourceTx.merklePath = beef.bumps[0];
-        }
         sourceVout = suitableUtxo.tx_pos;
         inputSats = suitableUtxo.value;
       }
