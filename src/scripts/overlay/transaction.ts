@@ -280,6 +280,7 @@ export async function lookupOverlay(
 /**
  * Parse an overlay output from BEEF data.
  * 
+ * Uses Transaction.fromBEEF() to get the final transaction (not the full chain).
  * Handles both formats:
  * - OP_FALSE OP_RETURN <protocol> <json> (standard)
  * - OP_RETURN <protocol> <json> (legacy)
@@ -301,73 +302,66 @@ export async function parseOverlayOutput(
       beefArray = Array.from(beefData);
     }
 
-    // Parse using Beef.fromBinary (handles BRC-95 BEEF format)
-    const beef = sdk.Beef.fromBinary(beefArray);
+    // Use Transaction.fromBEEF to get the FINAL transaction (not all ancestors)
+    const tx = sdk.Transaction.fromBEEF(beefArray);
+    if (!tx || !tx.outputs) return null;
 
-    // Find the transaction with the OP_RETURN output
-    for (const beefTx of (beef.txs || [])) {
-      const tx = beefTx.tx || beefTx._tx;
-      if (!tx || !tx.outputs) continue;
+    const output = tx.outputs[outputIndex];
+    if (!output) return null;
 
-      const output = tx.outputs[outputIndex];
-      if (!output) continue;
+    // Convert script to Uint8Array (toBinary may return plain Array)
+    const scriptRaw = output.lockingScript.toBinary();
+    const script = scriptRaw instanceof Uint8Array ? scriptRaw : new Uint8Array(scriptRaw);
 
-      // Convert script to Uint8Array (toBinary may return plain Array)
-      const scriptRaw = output.lockingScript.toBinary();
-      const script = scriptRaw instanceof Uint8Array ? scriptRaw : new Uint8Array(scriptRaw);
-
-      // Check for OP_RETURN patterns:
-      // - 0x6a ... (direct OP_RETURN)
-      // - 0x00 0x6a ... (OP_FALSE OP_RETURN)
-      let offset = 0;
-      if (script[0] === 0x6a) {
-        offset = 1;
-      } else if (script[0] === 0x00 && script[1] === 0x6a) {
-        offset = 2;
-      } else {
-        continue; // Not OP_RETURN
-      }
-
-      // Parse PUSHDATA opcodes to extract JSON
-      const readPush = (): Uint8Array | null => {
-        if (offset >= script.length) return null;
-        const op = script[offset++];
-        if (op <= 75) {
-          const data = script.slice(offset, offset + op);
-          offset += op;
-          return data;
-        } else if (op === 0x4c) {
-          const len = script[offset++];
-          const data = script.slice(offset, offset + len);
-          offset += len;
-          return data;
-        } else if (op === 0x4d) {
-          const len = script[offset] | (script[offset + 1] << 8);
-          offset += 2;
-          const data = script.slice(offset, offset + len);
-          offset += len;
-          return data;
-        }
-        return null;
-      };
-
-      // First push: protocol ID
-      readPush();
-
-      // Second push: JSON payload
-      const payloadBytes = readPush();
-      if (!payloadBytes) continue;
-
-      try {
-        const json = new TextDecoder().decode(payloadBytes);
-        const parsed = JSON.parse(json);
-        return parsed;
-      } catch {
-        continue;
-      }
+    // Check for OP_RETURN patterns:
+    // - 0x6a ... (direct OP_RETURN)
+    // - 0x00 0x6a ... (OP_FALSE OP_RETURN)
+    let offset = 0;
+    if (script[0] === 0x6a) {
+      offset = 1;
+    } else if (script[0] === 0x00 && script[1] === 0x6a) {
+      offset = 2;
+    } else {
+      return null; // Not OP_RETURN
     }
 
-    return null;
+    // Parse PUSHDATA opcodes to extract JSON
+    const readPush = (): Uint8Array | null => {
+      if (offset >= script.length) return null;
+      const op = script[offset++];
+      if (op <= 75) {
+        const data = script.slice(offset, offset + op);
+        offset += op;
+        return data;
+      } else if (op === 0x4c) {
+        const len = script[offset++];
+        const data = script.slice(offset, offset + len);
+        offset += len;
+        return data;
+      } else if (op === 0x4d) {
+        const len = script[offset] | (script[offset + 1] << 8);
+        offset += 2;
+        const data = script.slice(offset, offset + len);
+        offset += len;
+        return data;
+      }
+      return null;
+    };
+
+    // First push: protocol ID
+    const protocolBytes = readPush();
+    if (!protocolBytes) return null;
+    
+    // Verify protocol ID matches
+    const protocol = new TextDecoder().decode(protocolBytes);
+    if (protocol !== PROTOCOL_ID) return null;
+
+    // Second push: JSON payload
+    const payloadBytes = readPush();
+    if (!payloadBytes) return null;
+
+    const json = new TextDecoder().decode(payloadBytes);
+    return JSON.parse(json);
   } catch {
     return null;
   }
