@@ -1,8 +1,12 @@
 /**
  * Overlay transaction building utilities.
+ * 
+ * Follows the clawdbot-overlay server API:
+ * - Submit: POST /submit with binary BEEF and X-Topics header
+ * - OP_RETURN format: OP_FALSE OP_RETURN <"clawdbot-overlay-v1"> <JSON>
  */
 
-import { NETWORK, OVERLAY_URL } from '../config.js';
+import { NETWORK, OVERLAY_URL, PROTOCOL_ID } from '../config.js';
 import { wocFetch, fetchBeefFromWoC } from '../utils/woc.js';
 import { loadStoredChange, saveStoredChange, deleteStoredChange } from '../utils/storage.js';
 import { loadWalletIdentity, deriveWalletAddress } from '../wallet/identity.js';
@@ -42,29 +46,26 @@ async function getSdk(): Promise<any> {
 }
 
 /**
- * Build a PUSHDATA script for OP_RETURN data.
+ * Build an OP_RETURN locking script with JSON payload using SDK's Script class.
+ * 
+ * Format: OP_FALSE OP_RETURN <"clawdbot-overlay-v1"> <JSON payload>
+ * This matches the clawdbot-overlay server's expected format.
+ * 
+ * @param payload - The data to embed in the OP_RETURN
+ * @param sdk - The @bsv/sdk module
+ * @returns A proper Script object that the SDK can serialize
  */
-function pushData(data: Uint8Array): Uint8Array {
-  const len = data.length;
-  if (len <= 75) {
-    return new Uint8Array([len, ...data]);
-  } else if (len <= 255) {
-    return new Uint8Array([0x4c, len, ...data]);
-  } else if (len <= 65535) {
-    return new Uint8Array([0x4d, len & 0xff, (len >> 8) & 0xff, ...data]);
-  }
-  throw new Error('Data too large for OP_RETURN');
-}
+export function buildOpReturnScript(payload: OverlayPayload, sdk: any): any {
+  const protocolBytes = Array.from(new TextEncoder().encode(PROTOCOL_ID));
+  const jsonBytes = Array.from(new TextEncoder().encode(JSON.stringify(payload)));
 
-/**
- * Build an OP_RETURN locking script with JSON payload.
- */
-export function buildOpReturnScript(payload: OverlayPayload): Uint8Array {
-  const jsonBytes = new TextEncoder().encode(JSON.stringify(payload));
-  const opReturn = 0x6a;
-  const protocolBytes = pushData(new TextEncoder().encode('clawdbot'));
-  const payloadBytes = pushData(jsonBytes);
-  return new Uint8Array([opReturn, ...protocolBytes, ...payloadBytes]);
+  const script = new sdk.Script();
+  script.writeOpCode(0x00);   // OP_FALSE
+  script.writeOpCode(0x6a);   // OP_RETURN
+  script.writeBin(protocolBytes);
+  script.writeBin(jsonBytes);
+
+  return script;
 }
 
 /**
@@ -82,10 +83,11 @@ export async function buildRealOverlayTransaction(
   const privKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
   const { address, hash160 } = await deriveWalletAddress(privKey);
 
-  const OP_RETURN_SATS = 1;
+  // OP_RETURN outputs should have 0 satoshis (they're unspendable)
+  const OP_RETURN_SATS = 0;
   const MIN_CHANGE = 200;
   const MAX_FEE = 100; // max fee we're willing to pay
-  const MIN_INPUT = OP_RETURN_SATS + MIN_CHANGE + MAX_FEE;
+  const MIN_INPUT = MIN_CHANGE + MAX_FEE;
 
   // --- Fund the transaction ---
   let sourceTx: any = null;
@@ -144,6 +146,11 @@ export async function buildRealOverlayTransaction(
         if (!sourceTx) {
           throw new Error('BEEF tx object not found');
         }
+        // Attach merkle path from BEEF bumps if available
+        // This is required for SPV verification on the overlay server
+        if (beef.bumps && beef.bumps.length > 0 && !sourceTx.merklePath) {
+          sourceTx.merklePath = beef.bumps[0];
+        }
         sourceVout = suitableUtxo.tx_pos;
         inputSats = suitableUtxo.value;
       }
@@ -162,15 +169,18 @@ export async function buildRealOverlayTransaction(
     unlockingScriptTemplate: new sdk.P2PKH().unlock(privKey),
   });
 
-  // OP_RETURN output
-  const opReturnScript = buildOpReturnScript(payload);
+  // OP_RETURN output with 0 satoshis
+  const opReturnScript = buildOpReturnScript(payload, sdk);
   tx.addOutput({
-    lockingScript: { toBinary: () => opReturnScript },
+    lockingScript: opReturnScript,
     satoshis: OP_RETURN_SATS,
   });
 
   // Change output
-  const estimatedSize = 148 + 34 + opReturnScript.length + 34 + 10;
+  // Estimate script size: ~2 (opcodes) + ~20 (protocol) + payload JSON length
+  const payloadSize = JSON.stringify(payload).length;
+  const estimatedScriptSize = 2 + 1 + PROTOCOL_ID.length + 2 + payloadSize;
+  const estimatedSize = 148 + 34 + estimatedScriptSize + 34 + 10;
   const fee = Math.max(Math.ceil(estimatedSize / 1000), 1);
   const changeAmount = inputSats - OP_RETURN_SATS - fee;
 
@@ -187,13 +197,14 @@ export async function buildRealOverlayTransaction(
   const beefForOverlay = tx.toBEEF();
 
   // --- Submit to overlay ---
+  // Use binary BEEF with X-Topics header (matches clawdbot-overlay server API)
   const submitResp = await fetch(`${OVERLAY_URL}/submit`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      beef: sdk.Utils.toBase64(beefForOverlay),
-      topics: [topic],
-    }),
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Topics': JSON.stringify([topic]),
+    },
+    body: new Uint8Array(beefForOverlay),
   });
 
   if (!submitResp.ok) {
@@ -268,58 +279,95 @@ export async function lookupOverlay(
 
 /**
  * Parse an overlay output from BEEF data.
+ * 
+ * Handles both formats:
+ * - OP_FALSE OP_RETURN <protocol> <json> (standard)
+ * - OP_RETURN <protocol> <json> (legacy)
  */
 export async function parseOverlayOutput(
-  beefBase64: string | Uint8Array,
+  beefData: string | Uint8Array | number[],
   outputIndex: number
 ): Promise<OverlayPayload | null> {
   const sdk = await getSdk();
 
   try {
-    const beefBytes = typeof beefBase64 === 'string'
-      ? new Uint8Array(sdk.Utils.fromBase64(beefBase64))
-      : beefBase64;
+    // Handle different input formats
+    let beefArray: number[];
+    if (typeof beefData === 'string') {
+      beefArray = Array.from(new Uint8Array(sdk.Utils.fromBase64(beefData)));
+    } else if (Array.isArray(beefData)) {
+      beefArray = beefData;
+    } else {
+      beefArray = Array.from(beefData);
+    }
 
-    const tx = sdk.Transaction.fromAtomicBEEF(Array.from(beefBytes));
-    const output = tx.outputs[outputIndex];
-    if (!output) return null;
+    // Parse using Beef.fromBinary (handles BRC-95 BEEF format)
+    const beef = sdk.Beef.fromBinary(beefArray);
 
-    const script = output.lockingScript.toBinary();
-    if (script[0] !== 0x6a) return null; // Not OP_RETURN
+    // Find the transaction with the OP_RETURN output
+    for (const beefTx of (beef.txs || [])) {
+      const tx = beefTx.tx || beefTx._tx;
+      if (!tx || !tx.outputs) continue;
 
-    // Parse PUSHDATA opcodes to extract JSON
-    let offset = 1;
-    const readPush = (): Uint8Array | null => {
-      if (offset >= script.length) return null;
-      const op = script[offset++];
-      if (op <= 75) {
-        const data = script.slice(offset, offset + op);
-        offset += op;
-        return data;
-      } else if (op === 0x4c) {
-        const len = script[offset++];
-        const data = script.slice(offset, offset + len);
-        offset += len;
-        return data;
-      } else if (op === 0x4d) {
-        const len = script[offset] | (script[offset + 1] << 8);
-        offset += 2;
-        const data = script.slice(offset, offset + len);
-        offset += len;
-        return data;
+      const output = tx.outputs[outputIndex];
+      if (!output) continue;
+
+      // Convert script to Uint8Array (toBinary may return plain Array)
+      const scriptRaw = output.lockingScript.toBinary();
+      const script = scriptRaw instanceof Uint8Array ? scriptRaw : new Uint8Array(scriptRaw);
+
+      // Check for OP_RETURN patterns:
+      // - 0x6a ... (direct OP_RETURN)
+      // - 0x00 0x6a ... (OP_FALSE OP_RETURN)
+      let offset = 0;
+      if (script[0] === 0x6a) {
+        offset = 1;
+      } else if (script[0] === 0x00 && script[1] === 0x6a) {
+        offset = 2;
+      } else {
+        continue; // Not OP_RETURN
       }
-      return null;
-    };
 
-    // First push: protocol ID ('clawdbot')
-    readPush();
+      // Parse PUSHDATA opcodes to extract JSON
+      const readPush = (): Uint8Array | null => {
+        if (offset >= script.length) return null;
+        const op = script[offset++];
+        if (op <= 75) {
+          const data = script.slice(offset, offset + op);
+          offset += op;
+          return data;
+        } else if (op === 0x4c) {
+          const len = script[offset++];
+          const data = script.slice(offset, offset + len);
+          offset += len;
+          return data;
+        } else if (op === 0x4d) {
+          const len = script[offset] | (script[offset + 1] << 8);
+          offset += 2;
+          const data = script.slice(offset, offset + len);
+          offset += len;
+          return data;
+        }
+        return null;
+      };
 
-    // Second push: JSON payload
-    const payloadBytes = readPush();
-    if (!payloadBytes) return null;
+      // First push: protocol ID
+      readPush();
 
-    const json = new TextDecoder().decode(payloadBytes);
-    return JSON.parse(json);
+      // Second push: JSON payload
+      const payloadBytes = readPush();
+      if (!payloadBytes) continue;
+
+      try {
+        const json = new TextDecoder().decode(payloadBytes);
+        const parsed = JSON.parse(json);
+        return parsed;
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }

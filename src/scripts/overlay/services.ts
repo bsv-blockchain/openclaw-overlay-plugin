@@ -1,5 +1,15 @@
 /**
  * Overlay service commands: services, advertise, remove, readvertise.
+ * 
+ * Service payloads match the clawdbot-overlay server schema:
+ * - protocol: "clawdbot-overlay-v1"
+ * - type: "service"
+ * - identityKey: provider's compressed public key
+ * - serviceId: unique service identifier
+ * - name: human-readable name
+ * - description: what the service does
+ * - pricing: { model: "per-task", amountSats: number }
+ * - timestamp: ISO 8601 time
  */
 
 import { NETWORK, WALLET_DIR, PROTOCOL_ID, TOPICS } from '../config.js';
@@ -52,7 +62,7 @@ export async function cmdAdvertise(
     return fail(`Service '${serviceId}' already exists. Use 'readvertise' to update.`);
   }
 
-  // Create service record
+  // Create service record (local storage format)
   const newService: ServiceAdvertisement = {
     serviceId,
     name,
@@ -61,16 +71,19 @@ export async function cmdAdvertise(
     registeredAt: new Date().toISOString(),
   };
 
-  // Publish on-chain
+  // Publish on-chain (matches clawdbot-overlay server schema)
   const servicePayload = {
     protocol: PROTOCOL_ID,
-    type: 'service',
+    type: 'service' as const,
     identityKey,
     serviceId,
     name,
     description: newService.description,
-    pricingSats: priceSats,
-    advertisedAt: newService.registeredAt,
+    pricing: {
+      model: 'per-task',
+      amountSats: priceSats,
+    },
+    timestamp: new Date().toISOString(),
   };
 
   try {
@@ -152,17 +165,19 @@ export async function cmdReadvertise(
   if (description) existing.description = description;
   existing.registeredAt = new Date().toISOString();
 
-  // Publish update on-chain
+  // Publish update on-chain (matches clawdbot-overlay server schema)
   const servicePayload = {
     protocol: PROTOCOL_ID,
-    type: 'service',
+    type: 'service' as const,
     identityKey,
     serviceId,
     name: existing.name,
     description: existing.description,
-    pricingSats: existing.priceSats,
-    advertisedAt: existing.registeredAt,
-    updated: true,
+    pricing: {
+      model: 'per-task',
+      amountSats: existing.priceSats,
+    },
+    timestamp: existing.registeredAt,
   };
 
   try {
