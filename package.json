@@ -13,7 +13,7 @@
     "README.md"
   ],
   "bin": {
-    "bsv-overlay": "dist/cli.js"
+    "openclaw-overlay": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
