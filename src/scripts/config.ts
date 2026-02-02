@@ -30,7 +30,7 @@ export const NETWORK: 'mainnet' | 'testnet' =
   (process.env.BSV_NETWORK as 'mainnet' | 'testnet') || 'mainnet';
 
 /** Overlay server URL */
-export const OVERLAY_URL = process.env.OVERLAY_URL || 'http://162.243.168.235:8080';
+export const OVERLAY_URL = process.env.OVERLAY_URL || 'https://clawoverlay.com';
 
 /** WhatsOnChain API key (optional, for rate limit bypass) */
 export const WOC_API_KEY = process.env.WOC_API_KEY || '';
