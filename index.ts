@@ -22,6 +22,60 @@ let knownTxids: Set<string> = new Set();
 // Budget tracking
 const BUDGET_FILE = 'daily-spending.json';
 
+// Predefined service templates for auto-advertising
+const PREDEFINED_SERVICES: Record<string, { name: string; description: string; priceSats: number }> = {
+  'tell-joke': {
+    name: 'Random Joke',
+    description: 'Get a random joke. Guaranteed to be at least mildly amusing.',
+    priceSats: 5
+  },
+  'code-review': {
+    name: 'Code Review',
+    description: 'Thorough code review covering bugs, security issues, style, performance, and improvement suggestions.',
+    priceSats: 50
+  },
+  'web-research': {
+    name: 'Web Research',
+    description: 'Research any topic using current web sources. Returns a synthesized summary with cited sources.',
+    priceSats: 50
+  },
+  'translate': {
+    name: 'Translation',
+    description: 'Translate text between 30+ languages. Accurate, context-aware translations.',
+    priceSats: 20
+  },
+  'summarize': {
+    name: 'Summarize',
+    description: 'Summarize long text, articles, or documents into concise bullet points.',
+    priceSats: 20
+  },
+  'api-proxy': {
+    name: 'API Proxy',
+    description: 'Proxy HTTP requests to external APIs. Input: {url, method, headers, body}.',
+    priceSats: 15
+  },
+  'roulette': {
+    name: 'Roulette',
+    description: 'European roulette (single zero). Bet on: number 0-36, red/black, odd/even, high/low.',
+    priceSats: 10
+  },
+  'memory-store': {
+    name: 'Memory Store',
+    description: 'Persistent key-value storage for agents. Operations: set, get, delete, list.',
+    priceSats: 10
+  },
+  'code-develop': {
+    name: 'Code Development',
+    description: 'Generate code from requirements. Specify language, task description, and constraints.',
+    priceSats: 100
+  },
+  'image-analysis': {
+    name: 'Image Analysis',
+    description: 'Analyze and describe images. Identify objects, text, scenes, and more.',
+    priceSats: 30
+  }
+};
+
 interface DailySpending {
   date: string; // YYYY-MM-DD
   totalSats: number;
@@ -106,6 +160,9 @@ async function startAutoImport(env, cliPath, logger) {
               knownTxids.add(key);
               logger?.info?.(`[bsv-overlay] Auto-imported ${utxo.value} sats from ${utxo.tx_hash}`);
               
+              // Notify agent of successful import
+              wakeAgent(`💰 **Wallet Funded!**\n\nAuto-imported ${utxo.value} sats from transaction ${utxo.tx_hash.slice(0, 16)}...\n\nNotify the user their wallet has been funded.`, logger, { sessionKey: 'hook:bsv-overlay:import' });
+              
               // Check if registered, auto-register if not
               try {
                 const regPath = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'registration.json');
@@ -115,6 +172,9 @@ async function startAutoImport(env, cliPath, logger) {
                   const regOutput = parseCliOutput(regResult.stdout);
                   if (regOutput.success) {
                     logger?.info?.('[bsv-overlay] Auto-registered on overlay network!');
+                    
+                    // Auto-advertise services from config
+                    await autoAdvertiseServices(env, cliPath, logger);
                   }
                 }
               } catch (err) {
@@ -129,7 +189,7 @@ async function startAutoImport(env, cliPath, logger) {
       } catch (err) {
         // WoC API error — just skip this cycle
       }
-    }, 60000); // Check every 60 seconds
+    }, 30000); // Check every 30 seconds for faster onboarding
   } catch (err) {
     logger?.warn?.('[bsv-overlay] Auto-import setup failed:', err.message);
   }
@@ -139,6 +199,88 @@ function stopAutoImport() {
   if (autoImportInterval) {
     clearInterval(autoImportInterval);
     autoImportInterval = null;
+  }
+}
+
+// Auto-advertise services from config after registration
+async function autoAdvertiseServices(env, cliPath, logger) {
+  try {
+    // Read config to get services list
+    const configPaths = [
+      path.join(process.env.HOME || '', '.openclaw', 'openclaw.json'),
+      path.join(process.env.HOME || '', '.clawdbot', 'clawdbot.json'),
+    ];
+    
+    let servicesToAdvertise: string[] = [];
+    
+    for (const configPath of configPaths) {
+      if (!fs.existsSync(configPath)) continue;
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        const pluginConfig = config?.plugins?.entries?.['bsv-overlay']?.config;
+        if (pluginConfig?.services && Array.isArray(pluginConfig.services)) {
+          servicesToAdvertise = pluginConfig.services;
+          break;
+        }
+      } catch {}
+    }
+    
+    if (servicesToAdvertise.length === 0) {
+      logger?.info?.('[bsv-overlay] No services configured for auto-advertising');
+      return;
+    }
+    
+    logger?.info?.(`[bsv-overlay] Auto-advertising ${servicesToAdvertise.length} services from config...`);
+    
+    const advertised: string[] = [];
+    const failed: string[] = [];
+    
+    for (const serviceId of servicesToAdvertise) {
+      const serviceInfo = PREDEFINED_SERVICES[serviceId];
+      if (!serviceInfo) {
+        logger?.warn?.(`[bsv-overlay] Unknown service ID: ${serviceId}. Skipping.`);
+        failed.push(serviceId);
+        continue;
+      }
+      
+      try {
+        const result = await execFileAsync('node', [
+          cliPath, 'advertise',
+          serviceId,
+          serviceInfo.name,
+          serviceInfo.priceSats.toString(),
+          serviceInfo.description
+        ], { env, timeout: 60000 });
+        
+        const output = parseCliOutput(result.stdout);
+        if (output.success) {
+          advertised.push(serviceId);
+          logger?.info?.(`[bsv-overlay] Advertised service: ${serviceInfo.name} (${serviceId}) for ${serviceInfo.priceSats} sats`);
+        } else {
+          failed.push(serviceId);
+          logger?.warn?.(`[bsv-overlay] Failed to advertise ${serviceId}: ${output.error}`);
+        }
+      } catch (err: any) {
+        failed.push(serviceId);
+        logger?.warn?.(`[bsv-overlay] Error advertising ${serviceId}: ${err.message}`);
+      }
+    }
+    
+    // Wake agent with results
+    if (advertised.length > 0) {
+      const serviceList = advertised.map(id => {
+        const info = PREDEFINED_SERVICES[id];
+        return `• ${info?.name || id} (${info?.priceSats || '?'} sats)`;
+      }).join('\n');
+      
+      wakeAgent(
+        `🎉 **Services Auto-Advertised!**\n\nThe following services are now live on the overlay network:\n\n${serviceList}\n\n${failed.length > 0 ? `⚠️ Failed to advertise: ${failed.join(', ')}` : ''}`,
+        logger,
+        { sessionKey: 'hook:bsv-overlay:services' }
+      );
+    }
+  } catch (err: any) {
+    logger?.warn?.(`[bsv-overlay] Auto-advertise failed: ${err.message}`);
   }
 }
 
@@ -557,6 +699,69 @@ export default function register(api) {
     }
   });
 
+  // Register /overlay auto-reply command for instant status
+  api.registerCommand?.({
+    name: 'overlay',
+    description: 'Check BSV Overlay Network status instantly',
+    handler: async (ctx) => {
+      try {
+        const config = pluginConfig;
+        const env = buildEnvironment(config);
+        const cliPath = path.join(__dirname, 'dist', 'scripts', 'overlay-cli.js');
+        
+        // Check registration status
+        const regPath = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'registration.json');
+        const isRegistered = fs.existsSync(regPath);
+        
+        // Get balance
+        let balance = 0;
+        let address = '';
+        try {
+          const balResult = await execFileAsync('node', [cliPath, 'balance'], { env, timeout: 15000 });
+          const balOutput = parseCliOutput(balResult.stdout);
+          balance = balOutput?.data?.walletBalance || 0;
+        } catch {}
+        
+        try {
+          const addrResult = await execFileAsync('node', [cliPath, 'address'], { env, timeout: 15000 });
+          const addrOutput = parseCliOutput(addrResult.stdout);
+          address = addrOutput?.data?.address || '';
+        } catch {}
+        
+        // Get services count
+        let servicesCount = 0;
+        try {
+          const svcResult = await execFileAsync('node', [cliPath, 'services'], { env, timeout: 15000 });
+          const svcOutput = parseCliOutput(svcResult.stdout);
+          servicesCount = svcOutput?.data?.count || 0;
+        } catch {}
+        
+        // Build status message
+        let text = '**BSV Overlay Status**\n\n';
+        
+        if (isRegistered) {
+          const reg = JSON.parse(fs.readFileSync(regPath, 'utf-8'));
+          text += `✅ **Registered** as ${reg.agentName || 'Agent'}\n`;
+          text += `💰 **Balance:** ${balance.toLocaleString()} sats\n`;
+          text += `📋 **Services:** ${servicesCount} advertised\n`;
+          text += `🌐 **Network:** ${config?.overlayUrl || 'https://clawoverlay.com'}`;
+        } else if (balance >= 1000) {
+          text += `💰 **Funded** (${balance.toLocaleString()} sats)\n`;
+          text += `⏳ Registering on next cycle...\n`;
+          text += `\nRun \`overlay({ action: "register" })\` to register now.`;
+        } else {
+          text += `❌ **Not Registered**\n\n`;
+          text += `📬 Fund this address to join:\n\`${address}\`\n\n`;
+          text += `💰 Need: 1,000+ sats (~$0.05)`;
+        }
+        
+        return { text };
+      } catch (err: any) {
+        return { text: `❌ Error checking status: ${err.message}` };
+      }
+    }
+  });
+
   // Register CLI commands
   api.registerCli(({ program }) => {
     const overlay = program.command("overlay").description("BSV Overlay Network commands");
@@ -671,6 +876,144 @@ export default function register(api) {
           console.error("Error:", error.message);
         }
       });
+
+    overlay.command("wizard")
+      .description("Interactive setup wizard for BSV Overlay Network")
+      .action(async () => {
+        const readline = await import('readline');
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        
+        const prompt = (question: string): Promise<string> => 
+          new Promise(resolve => rl.question(question, resolve));
+        
+        console.log('\n🔌 BSV Overlay Network — Setup Wizard\n');
+        console.log('This wizard will help you configure and join the overlay network.\n');
+        
+        try {
+          const config = pluginConfig;
+          const env = buildEnvironment(config);
+          const cliPath = path.join(__dirname, 'dist', 'scripts', 'overlay-cli.js');
+          
+          // Step 1: Agent Name
+          console.log('─'.repeat(50));
+          console.log('Step 1: Agent Identity\n');
+          const currentName = config?.agentName || env.AGENT_NAME || 'clawdbot-agent';
+          const agentName = await prompt(`Agent name [${currentName}]: `) || currentName;
+          
+          // Step 2: Service Selection
+          console.log('\n' + '─'.repeat(50));
+          console.log('Step 2: Services to Offer\n');
+          console.log('Available services:');
+          const serviceIds = Object.keys(PREDEFINED_SERVICES);
+          serviceIds.forEach((id, i) => {
+            const svc = PREDEFINED_SERVICES[id];
+            console.log(`  ${i + 1}. ${svc.name} (${svc.priceSats} sats) - ${id}`);
+          });
+          console.log('\nEnter service numbers separated by commas (e.g., 1,2,5)');
+          console.log('Or press Enter to skip service selection.\n');
+          const serviceInput = await prompt('Services to advertise: ');
+          
+          const selectedServices: string[] = [];
+          if (serviceInput.trim()) {
+            const nums = serviceInput.split(',').map(s => parseInt(s.trim()) - 1);
+            for (const n of nums) {
+              if (n >= 0 && n < serviceIds.length) {
+                selectedServices.push(serviceIds[n]);
+              }
+            }
+          }
+          
+          // Step 3: Budget Configuration
+          console.log('\n' + '─'.repeat(50));
+          console.log('Step 3: Budget Limits\n');
+          const maxPay = await prompt(`Max auto-pay per request [${config?.maxAutoPaySats || 200}]: `) || String(config?.maxAutoPaySats || 200);
+          const dailyBudget = await prompt(`Daily spending limit [${config?.dailyBudgetSats || 5000}]: `) || String(config?.dailyBudgetSats || 5000);
+          
+          // Generate config
+          console.log('\n' + '─'.repeat(50));
+          console.log('Configuration\n');
+          const newConfig = {
+            agentName,
+            ...(selectedServices.length > 0 && { services: selectedServices }),
+            maxAutoPaySats: parseInt(maxPay),
+            dailyBudgetSats: parseInt(dailyBudget)
+          };
+          console.log('Add this to your config under plugins.entries.bsv-overlay.config:\n');
+          console.log(JSON.stringify(newConfig, null, 2));
+          
+          // Step 4: Show funding address
+          console.log('\n' + '─'.repeat(50));
+          console.log('Step 4: Funding\n');
+          
+          // Ensure wallet exists
+          try {
+            await execFileAsync('node', [cliPath, 'setup'], { env });
+          } catch {}
+          
+          const addrResult = await execFileAsync('node', [cliPath, 'address'], { env });
+          const addrOutput = parseCliOutput(addrResult.stdout);
+          const address = addrOutput?.data?.address;
+          
+          const balResult = await execFileAsync('node', [cliPath, 'balance'], { env });
+          const balOutput = parseCliOutput(balResult.stdout);
+          const balance = balOutput?.data?.walletBalance || 0;
+          
+          if (balance >= 1000) {
+            console.log(`✅ Wallet already funded: ${balance.toLocaleString()} sats`);
+          } else {
+            console.log('Send BSV to this address to fund your agent:\n');
+            console.log(`  📬 ${address}`);
+            console.log(`  💰 Minimum: 1,000 sats (~$0.05)\n`);
+          }
+          
+          // Step 5: Registration
+          console.log('─'.repeat(50));
+          console.log('Step 5: Registration\n');
+          
+          if (balance >= 1000) {
+            const doRegister = await prompt('Register now? [Y/n]: ');
+            if (doRegister.toLowerCase() !== 'n') {
+              console.log('\nRegistering...');
+              const regResult = await execFileAsync('node', [cliPath, 'register'], { 
+                env: { ...env, AGENT_NAME: agentName }, 
+                timeout: 60000 
+              });
+              const regOutput = parseCliOutput(regResult.stdout);
+              if (regOutput.success) {
+                console.log('✅ Registered on the overlay network!');
+                
+                // Auto-advertise selected services
+                if (selectedServices.length > 0) {
+                  console.log(`\nAdvertising ${selectedServices.length} services...`);
+                  for (const serviceId of selectedServices) {
+                    const svc = PREDEFINED_SERVICES[serviceId];
+                    try {
+                      await execFileAsync('node', [
+                        cliPath, 'advertise', serviceId, svc.name, svc.priceSats.toString(), svc.description
+                      ], { env, timeout: 60000 });
+                      console.log(`  ✅ ${svc.name} (${svc.priceSats} sats)`);
+                    } catch (err: any) {
+                      console.log(`  ❌ ${svc.name}: ${err.message}`);
+                    }
+                  }
+                }
+              } else {
+                console.log(`❌ Registration failed: ${regOutput.error}`);
+              }
+            }
+          } else {
+            console.log('Fund your wallet, then run: openclaw overlay register');
+          }
+          
+          console.log('\n' + '─'.repeat(50));
+          console.log('Setup complete! 🎉\n');
+          
+        } catch (error: any) {
+          console.error('\nError:', error.message);
+        } finally {
+          rl.close();
+        }
+      });
   }, { commands: ["overlay"] });
 
   // ---------------------------------------------------------------------------
@@ -722,7 +1065,11 @@ export default function register(api) {
         const regOutput = parseCliOutput(regResult.stdout);
         if (regOutput.success) {
           api.log?.info?.('[bsv-overlay] Auto-registered on overlay network!');
-          const wakeText = `🎉 **BSV Overlay: Registered on the network!**\n\nNotify the user that their agent is now live on the OpenClaw Overlay Network.\n\nNext steps to present to the user:\n1. **Choose an agent name**: Current name is "${env.AGENT_NAME}". To change it, set \`agentName\` in the plugin config and re-register.\n2. **Advertise services**: Ask the user which services they want to offer. Use overlay({ action: "services" }) to see current services, and overlay({ action: "advertise", ... }) to add new ones.\n\nAvailable service types include: code-review, web-research, translate, tell-joke, roulette, and custom services.`;
+          
+          // Auto-advertise services from config
+          await autoAdvertiseServices(env, cliPath, api.log);
+          
+          const wakeText = `🎉 **BSV Overlay: Registered on the network!**\n\nYour agent is now live on the OpenClaw Overlay Network.\n\nCurrent name: "${env.AGENT_NAME}"\n\nUse /overlay for instant status or ask me about your services.`;
           wakeAgent(wakeText, api.log);
           return; // Registered — done with onboarding
         }
