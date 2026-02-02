@@ -5,9 +5,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { OVERLAY_URL, PATHS, WALLET_DIR } from '../config.js';
-import { loadBaemailConfig, BaemailConfig, BaemailLogEntry } from './commands.js';
-import { loadIdentity, signRelayMessage } from '../wallet/identity.js';
+import { OVERLAY_URL, PATHS } from '../config.js';
+import { loadBaemailConfig, BaemailLogEntry } from './commands.js';
+import { signRelayMessage } from '../wallet/identity.js';
 import { verifyAndAcceptPayment } from '../messaging/handlers.js';
 import { fetchWithTimeout } from '../utils/woc.js';
 import { ensureStateDir } from '../utils/storage.js';

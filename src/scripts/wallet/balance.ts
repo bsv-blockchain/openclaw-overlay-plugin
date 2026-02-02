@@ -3,7 +3,7 @@
  */
 
 import fs from 'node:fs';
-import { NETWORK, WALLET_DIR, OVERLAY_STATE_DIR, PATHS } from '../config.js';
+import { NETWORK, WALLET_DIR, PATHS } from '../config.js';
 import { ok, fail } from '../output.js';
 import { loadWalletIdentity, deriveWalletAddress } from './identity.js';
 import { wocFetch, fetchBeefFromWoC, getExplorerBaseUrl } from '../utils/woc.js';

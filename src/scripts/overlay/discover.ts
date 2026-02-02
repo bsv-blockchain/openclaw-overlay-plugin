@@ -3,7 +3,7 @@
  */
 
 import { OVERLAY_URL, LOOKUP_SERVICES } from '../config.js';
-import { ok, fail } from '../output.js';
+import { ok } from '../output.js';
 import { lookupOverlay, parseOverlayOutput } from './transaction.js';
 
 // Dynamic import for @bsv/sdk

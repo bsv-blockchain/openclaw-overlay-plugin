@@ -2,9 +2,9 @@
  * Overlay service commands: services, advertise, remove, readvertise.
  */
 
-import { NETWORK, WALLET_DIR, PROTOCOL_ID, TOPICS, PATHS } from '../config.js';
+import { NETWORK, WALLET_DIR, PROTOCOL_ID, TOPICS } from '../config.js';
 import { ok, fail } from '../output.js';
-import { loadServices, saveServices, loadRegistration } from '../utils/storage.js';
+import { loadServices, saveServices } from '../utils/storage.js';
 import { buildRealOverlayTransaction } from './transaction.js';
 import type { ServiceAdvertisement } from '../types.js';
 

@@ -2,7 +2,7 @@
  * Overlay transaction building utilities.
  */
 
-import { NETWORK, WALLET_DIR, OVERLAY_URL, PROTOCOL_ID, TOPICS } from '../config.js';
+import { NETWORK, OVERLAY_URL } from '../config.js';
 import { wocFetch, fetchBeefFromWoC } from '../utils/woc.js';
 import { loadStoredChange, saveStoredChange, deleteStoredChange } from '../utils/storage.js';
 import { loadWalletIdentity, deriveWalletAddress } from '../wallet/identity.js';

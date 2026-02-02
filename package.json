@@ -13,25 +13,33 @@
     "README.md"
   ],
   "scripts": {
-    "build:cli": "tsc -p scripts/tsconfig.json",
+    "build": "tsc -p scripts/tsconfig.json",
     "cli": "node dist/scripts/overlay-cli.js",
-    "cli:legacy": "node scripts/overlay-cli.mjs",
-    "prepublishOnly": "npm run build:cli",
+    "lint": "eslint scripts/**/*.ts",
     "postinstall": "node -e \"try{require('better-sqlite3')}catch{console.log('Note: better-sqlite3 requires build tools. If install failed, ensure python3 and a C++ compiler are available.')}\""
   },
   "dependencies": {
     "@a2a-bsv/core": "^0.1.1",
     "@bsv/sdk": "^1.10.3",
+    "@bsv/wallet-toolbox": "^1.7.22",
     "better-sqlite3": "^11.0.0",
+    "dotenv": "^17.2.3",
     "knex": "^3.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.7",
     "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint": "^9.39.2",
+    "globals": "^17.3.0",
     "typescript": "^5.9.3"
   },
   "optionalDependencies": {
     "ws": "^8.19.0"
+  },
+  "overrides": {
+    "tar": "^7.5.7"
   },
   "repository": {
     "type": "git",

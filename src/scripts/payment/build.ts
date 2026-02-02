@@ -9,7 +9,7 @@
  */
 
 import { NETWORK, WALLET_DIR } from '../config.js';
-import type { PaymentResult, PaymentParams } from './types.js';
+import type { PaymentResult } from './types.js';
 
 // Dynamic import for BSVAgentWallet
 let _BSVAgentWallet: any = null;

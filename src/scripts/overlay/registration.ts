@@ -5,7 +5,6 @@
 import fs from 'node:fs';
 import { NETWORK, WALLET_DIR, OVERLAY_URL, PROTOCOL_ID, TOPICS, PATHS } from '../config.js';
 import { ok, fail } from '../output.js';
-import { loadWalletIdentity } from '../wallet/identity.js';
 import { loadRegistration, saveRegistration, deleteRegistration, loadServices } from '../utils/storage.js';
 import { buildRealOverlayTransaction } from './transaction.js';
 

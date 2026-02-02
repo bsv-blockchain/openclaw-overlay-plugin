@@ -3,7 +3,7 @@
  */
 
 import fs from 'node:fs';
-import { OVERLAY_URL, OVERLAY_STATE_DIR, PATHS } from '../config.js';
+import { OVERLAY_URL, PATHS } from '../config.js';
 import { fail } from '../output.js';
 import { loadIdentity } from '../wallet/identity.js';
 import { processMessage } from './handlers.js';

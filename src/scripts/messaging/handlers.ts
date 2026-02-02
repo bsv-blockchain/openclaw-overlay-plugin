@@ -2,12 +2,10 @@
  * Message type handlers and processMessage function.
  */
 
-import fs from 'node:fs';
-import { OVERLAY_URL, WALLET_DIR, OVERLAY_STATE_DIR, PATHS } from '../config.js';
-import { loadIdentity, signRelayMessage, verifyRelaySignature, loadWalletIdentity } from '../wallet/identity.js';
-import { loadServices, appendToJsonl, ensureStateDir } from '../utils/storage.js';
+import { OVERLAY_URL, WALLET_DIR, PATHS } from '../config.js';
+import { signRelayMessage, verifyRelaySignature, loadWalletIdentity } from '../wallet/identity.js';
+import { loadServices, appendToJsonl } from '../utils/storage.js';
 import { fetchWithTimeout } from '../utils/woc.js';
-import { buildDirectPayment } from '../payment/build.js';
 import type { RelayMessage, ProcessMessageResult } from '../types.js';
 
 // Dynamic import for @bsv/sdk (needed for hash160 computation)

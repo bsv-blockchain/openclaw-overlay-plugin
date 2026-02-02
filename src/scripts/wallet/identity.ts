@@ -3,7 +3,7 @@
  */
 
 import fs from 'node:fs';
-import { WALLET_DIR, PATHS } from '../config.js';
+import { PATHS } from '../config.js';
 import type { WalletIdentity } from '../types.js';
 
 // Dynamic import for @bsv/sdk

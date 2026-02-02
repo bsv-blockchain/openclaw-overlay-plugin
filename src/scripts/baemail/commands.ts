@@ -3,12 +3,10 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
-import { OVERLAY_STATE_DIR, PATHS, WALLET_DIR } from '../config.js';
+import { PATHS } from '../config.js';
 import { ok, fail } from '../output.js';
 import { loadIdentity } from '../wallet/identity.js';
-import { ensureStateDir, readJsonl } from '../utils/storage.js';
+import { ensureStateDir } from '../utils/storage.js';
 import { fetchWithTimeout } from '../utils/woc.js';
 
 // Types

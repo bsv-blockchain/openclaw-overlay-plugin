@@ -4,7 +4,7 @@
 
 import fs from 'node:fs';
 import { PATHS } from '../config.js';
-import { ok, fail } from '../output.js';
+import { ok } from '../output.js';
 import { readJsonl } from '../utils/storage.js';
 
 /**

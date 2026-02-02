@@ -6,6 +6,9 @@
  * All business logic is in the lib/ modules.
  */
 
+// Suppress dotenv v17 verbose logging (from @a2a-bsv/core dependency)
+process.env.DOTENV_CONFIG_QUIET = 'true';
+
 import { fail } from './lib/output.js';
 
 // Wallet commands
