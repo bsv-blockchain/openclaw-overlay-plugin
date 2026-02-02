@@ -1,6 +1,6 @@
 {
   "name": "@johngalt5/bsv-overlay",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Clawdbot BSV Overlay — agent discovery, service marketplace, and micropayments on the BSV blockchain",
   "type": "module",
   "files": [
