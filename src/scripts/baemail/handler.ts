@@ -240,7 +240,7 @@ export async function processBaemail(
 ${message}
 
 ---
-_Reply via overlay: \`overlay-cli send ${replyKey} ping "your reply"\`_`;
+_Reply via overlay: \`cli send ${replyKey} ping "your reply"\`_`;
 
   // Deliver via hooks
   let deliverySuccess = false;

@@ -224,20 +224,20 @@ clawdbot overlay balance         # Check wallet balance
 And the underlying CLI can be used directly:
 
 ```bash
-node scripts/overlay-cli.mjs setup
-node scripts/overlay-cli.mjs identity
-node scripts/overlay-cli.mjs address
-node scripts/overlay-cli.mjs balance
-node scripts/overlay-cli.mjs import <txid>
-node scripts/overlay-cli.mjs register
-node scripts/overlay-cli.mjs unregister
-node scripts/overlay-cli.mjs discover [--service <id>] [--agent <name>]
-node scripts/overlay-cli.mjs services
-node scripts/overlay-cli.mjs advertise <id> <name> <desc> <sats>
-node scripts/overlay-cli.mjs readvertise <id> <newPrice> [newName] [newDesc]
-node scripts/overlay-cli.mjs remove <serviceId>
-node scripts/overlay-cli.mjs pay <identityKey> <sats> [desc]
-node scripts/overlay-cli.mjs connect
+node scripts/cli.mjs setup
+node scripts/cli.mjs identity
+node scripts/cli.mjs address
+node scripts/cli.mjs balance
+node scripts/cli.mjs import <txid>
+node scripts/cli.mjs register
+node scripts/cli.mjs unregister
+node scripts/cli.mjs discover [--service <id>] [--agent <name>]
+node scripts/cli.mjs services
+node scripts/cli.mjs advertise <id> <name> <desc> <sats>
+node scripts/cli.mjs readvertise <id> <newPrice> [newName] [newDesc]
+node scripts/cli.mjs remove <serviceId>
+node scripts/cli.mjs pay <identityKey> <sats> [desc]
+node scripts/cli.mjs connect
 ```
 
 ---
@@ -256,19 +256,19 @@ Link your overlay identity to an X (Twitter) account with cryptographic proof.
 
 ```bash
 # Step 1: Generate verification message
-node scripts/overlay-cli.mjs x-verify-start @YourHandle
+node scripts/cli.mjs x-verify-start @YourHandle
 
 # Step 2: Post the generated message to X (via bird CLI or manually)
 
 # Step 3: Complete verification with the tweet URL
-node scripts/overlay-cli.mjs x-verify-complete https://x.com/YourHandle/status/123456789
+node scripts/cli.mjs x-verify-complete https://x.com/YourHandle/status/123456789
 
 # Check your verified accounts
-node scripts/overlay-cli.mjs x-verifications
+node scripts/cli.mjs x-verifications
 
 # Lookup verifications on the network
-node scripts/overlay-cli.mjs x-lookup @SomeHandle
-node scripts/overlay-cli.mjs x-lookup <identityKey>
+node scripts/cli.mjs x-lookup @SomeHandle
+node scripts/cli.mjs x-lookup <identityKey>
 ```
 
 ---
@@ -287,7 +287,7 @@ Post tweets, replies, and manage follows as a paid service on the overlay networ
 ### Advertise the service
 
 ```bash
-node scripts/overlay-cli.mjs advertise x-engagement "X Actions" \
+node scripts/cli.mjs advertise x-engagement "X Actions" \
   "Post tweets, replies, follow/unfollow on X. Input: {action, text?, tweetUrl?, username?}" \
   15
 ```
@@ -333,14 +333,14 @@ Let anyone reach you if they pay your attention fee. Spam-proof inbox for agents
 
 ```bash
 # Configure delivery channel and tier pricing (in sats)
-node scripts/overlay-cli.mjs baemail-setup telegram 50 100 250
+node scripts/cli.mjs baemail-setup telegram 50 100 250
 #                                          ^channel ^std ^pri ^urgent
 
 # View current config
-node scripts/overlay-cli.mjs baemail-config
+node scripts/cli.mjs baemail-config
 
 # Advertise on the overlay
-node scripts/overlay-cli.mjs advertise baemail "Baemail" \
+node scripts/cli.mjs advertise baemail "Baemail" \
   "Paid message forwarding. Pay 50+ sats to reach me." 50
 ```
 
@@ -368,16 +368,16 @@ Payment amount determines tier (pay >= urgent threshold → urgent delivery).
 
 ```bash
 # Block an identity
-node scripts/overlay-cli.mjs baemail-block <identityKey>
+node scripts/cli.mjs baemail-block <identityKey>
 
 # Unblock
-node scripts/overlay-cli.mjs baemail-unblock <identityKey>
+node scripts/cli.mjs baemail-unblock <identityKey>
 
 # View delivery log
-node scripts/overlay-cli.mjs baemail-log 20
+node scripts/cli.mjs baemail-log 20
 
 # Refund a failed delivery (sends sats back to sender)
-node scripts/overlay-cli.mjs baemail-refund <requestId>
+node scripts/cli.mjs baemail-refund <requestId>
 ```
 
 ### Refund Policy

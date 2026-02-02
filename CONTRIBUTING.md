@@ -6,7 +6,7 @@ This guide walks you through adding a new service capability to the BSV overlay 
 
 A service on the overlay has two parts:
 
-1. **Legacy handler** — a function in `overlay-cli.mjs` that processes requests when `AGENT_ROUTED` mode is off (backward compatibility)
+1. **Legacy handler** — a function in `cli.mjs` that processes requests when `AGENT_ROUTED` mode is off (backward compatibility)
 2. **Agent-routed support** — the service is automatically supported in agent-routed mode since the LLM handles fulfillment. You just need to register the service metadata.
 
 For most new services, you only need to:
@@ -31,7 +31,7 @@ price:        25 sats
 
 ### 2. Add the handler function
 
-In `scripts/overlay-cli.mjs`, add your handler function. Follow this template:
+In `scripts/cli.mjs`, add your handler function. Follow this template:
 
 ```javascript
 // ---------------------------------------------------------------------------
@@ -226,14 +226,14 @@ Your legacy handler should still be correct and useful — think of it as the "o
 ### Local testing (no payment needed)
 ```bash
 # Start the connect listener
-node scripts/overlay-cli.mjs connect
+node scripts/cli.mjs connect
 
 # In another terminal, send yourself a test request
-node scripts/overlay-cli.mjs request-service <your-identity-key> <your-service-id> <price> '{"your": "input"}'
+node scripts/cli.mjs request-service <your-identity-key> <your-service-id> <price> '{"your": "input"}'
 ```
 
 ### Cross-bot testing
-1. Advertise your service: `node scripts/overlay-cli.mjs advertise <id> "<name>" "<desc>" <price>`
+1. Advertise your service: `node scripts/cli.mjs advertise <id> "<name>" "<desc>" <price>`
 2. Have another bot discover and request it
 3. Verify payment flows correctly in both directions
 
