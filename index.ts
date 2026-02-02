@@ -679,7 +679,7 @@ export default function register(api) {
       try {
         const config = pluginConfig;
         const env = buildEnvironment(config);
-        const cliPath = path.join(__dirname, 'dist', 'scripts', 'cli.js');
+        const cliPath = path.join(__dirname, 'dist', 'cli.js');
         
         // Use the improved background service
         startBackgroundService(env, cliPath, api.logger);
@@ -707,7 +707,7 @@ export default function register(api) {
       try {
         const config = pluginConfig;
         const env = buildEnvironment(config);
-        const cliPath = path.join(__dirname, 'dist', 'scripts', 'cli.js');
+        const cliPath = path.join(__dirname, 'dist', 'cli.js');
         
         // Check registration status
         const regPath = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'registration.json');
@@ -771,7 +771,7 @@ export default function register(api) {
       .action(async () => {
         try {
           const config = pluginConfig;
-          const result = await handleStatus(buildEnvironment(config), path.join(__dirname, 'dist', 'scripts', 'cli.js'));
+          const result = await handleStatus(buildEnvironment(config), path.join(__dirname, 'dist', 'cli.js'));
           console.log("BSV Overlay Status:");
           console.log("Identity:", result.identity);
           console.log("Balance:", result.balance);
@@ -786,7 +786,7 @@ export default function register(api) {
       .action(async () => {
         try {
           const config = pluginConfig;
-          const result = await handleBalance(buildEnvironment(config), path.join(__dirname, 'dist', 'scripts', 'cli.js'));
+          const result = await handleBalance(buildEnvironment(config), path.join(__dirname, 'dist', 'cli.js'));
           console.log("Balance:", result);
         } catch (error) {
           console.error("Error:", error.message);
@@ -798,7 +798,7 @@ export default function register(api) {
       .action(async () => {
         try {
           const config = pluginConfig;
-          const result = await handleAddress(buildEnvironment(config), path.join(__dirname, 'dist', 'scripts', 'cli.js'));
+          const result = await handleAddress(buildEnvironment(config), path.join(__dirname, 'dist', 'cli.js'));
           console.log("Address:", result);
         } catch (error) {
           console.error("Error:", error.message);
@@ -812,7 +812,7 @@ export default function register(api) {
       .action(async (options) => {
         try {
           const config = pluginConfig;
-          const result = await handleDiscover(options, buildEnvironment(config), path.join(__dirname, 'dist', 'scripts', 'cli.js'));
+          const result = await handleDiscover(options, buildEnvironment(config), path.join(__dirname, 'dist', 'cli.js'));
           console.log("Discovery results:");
           console.log(`Overlay URL: ${result.overlayUrl}`);
           console.log(`Agents: ${result.agentCount}, Services: ${result.serviceCount}`);
@@ -838,7 +838,7 @@ export default function register(api) {
       .action(async () => {
         try {
           const config = pluginConfig;
-          const result = await handleServices(buildEnvironment(config), path.join(__dirname, 'dist', 'scripts', 'cli.js'));
+          const result = await handleServices(buildEnvironment(config), path.join(__dirname, 'dist', 'cli.js'));
           console.log("Our services:", result);
         } catch (error) {
           console.error("Error:", error.message);
@@ -851,7 +851,7 @@ export default function register(api) {
         try {
           const config = pluginConfig;
           const env = buildEnvironment(config);
-          const cliPath = path.join(__dirname, 'dist', 'scripts', 'cli.js');
+          const cliPath = path.join(__dirname, 'dist', 'cli.js');
           
           const result = await execFileAsync('node', [cliPath, 'setup'], { env });
           const output = parseCliOutput(result.stdout);
@@ -867,7 +867,7 @@ export default function register(api) {
         try {
           const config = pluginConfig;
           const env = buildEnvironment(config);
-          const cliPath = path.join(__dirname, 'dist', 'scripts', 'cli.js');
+          const cliPath = path.join(__dirname, 'dist', 'cli.js');
           
           const result = await execFileAsync('node', [cliPath, 'register'], { env });
           const output = parseCliOutput(result.stdout);
@@ -892,7 +892,7 @@ export default function register(api) {
         try {
           const config = pluginConfig;
           const env = buildEnvironment(config);
-          const cliPath = path.join(__dirname, 'dist', 'scripts', 'cli.js');
+          const cliPath = path.join(__dirname, 'dist', 'cli.js');
           
           // Step 1: Agent Name
           console.log('─'.repeat(50));
@@ -1025,7 +1025,7 @@ export default function register(api) {
       const walletDir = config?.walletDir || path.join(process.env.HOME || '', '.clawdbot', 'bsv-wallet');
       const identityFile = path.join(walletDir, 'wallet-identity.json');
       const env = buildEnvironment(config || {});
-      const cliPath = path.join(__dirname, 'dist', 'scripts', 'cli.js');
+      const cliPath = path.join(__dirname, 'dist', 'cli.js');
 
       // Step 0: Auto-enable hooks if not configured
       // The plugin needs hooks.enabled + hooks.token for async wake-ups via /hooks/agent
@@ -1106,7 +1106,7 @@ export default function register(api) {
 async function executeOverlayAction(params, config, api) {
   const { action } = params;
   const env = buildEnvironment(config);
-  const cliPath = path.join(__dirname, 'dist', 'scripts', 'cli.js');
+  const cliPath = path.join(__dirname, 'dist', 'cli.js');
 
   switch (action) {
     case "request":
