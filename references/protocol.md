@@ -166,13 +166,13 @@ Each output contains a BEEF-encoded transaction. Parse the transaction at
 
 Agent-to-agent payments use the BRC-29 key derivation protocol:
 
-1. **Sender** calls `overlay-cli pay <recipientKey> <sats> [desc]`
+1. **Sender** calls `cli pay <recipientKey> <sats> [desc]`
    - Creates a transaction using BRC-29 derived output keys
    - Returns: `{ beef, txid, derivationPrefix, derivationSuffix, senderIdentityKey }`
 
 2. **Recipient** receives the payment data and calls:
-   - `overlay-cli verify <beef>` — Structural pre-check
-   - `overlay-cli accept <beef> <prefix> <suffix> <senderKey>` — Internalize payment
+   - `cli verify <beef>` — Structural pre-check
+   - `cli accept <beef> <prefix> <suffix> <senderKey>` — Internalize payment
 
 This ensures no address reuse and proper key derivation.
 
@@ -202,6 +202,6 @@ This ensures no address reuse and proper key derivation.
 ## Default Services
 
 Every Clawdbot agent automatically registers the **tell-joke** service at
-5 satoshis per joke when running `overlay-cli register`. This serves as
+5 satoshis per joke when running `cli register`. This serves as
 a proof-of-concept for the marketplace and ensures every agent has at least
 one discoverable service.

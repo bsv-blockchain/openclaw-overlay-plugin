@@ -46,7 +46,7 @@ async function getSdk(): Promise<any> {
  */
 export function loadWalletIdentity(): WalletIdentity {
   if (!fs.existsSync(PATHS.walletIdentity)) {
-    throw new Error('Wallet not initialized. Run: overlay-cli setup');
+    throw new Error('Wallet not initialized. Run: cli setup');
   }
 
   // Security warning for overly permissive file mode

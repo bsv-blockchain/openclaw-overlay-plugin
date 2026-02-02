@@ -105,7 +105,7 @@ export async function cmdBaemailSetup(
     configured: true,
     deliveryChannel: channel,
     tiers: config.tiers,
-    note: `Advertise with: overlay-cli advertise baemail "Baemail" "Paid message forwarding. Pay ${standard}+ sats to reach me." ${standard}`,
+    note: `Advertise with: cli advertise baemail "Baemail" "Paid message forwarding. Pay ${standard}+ sats to reach me." ${standard}`,
   });
 }
 
