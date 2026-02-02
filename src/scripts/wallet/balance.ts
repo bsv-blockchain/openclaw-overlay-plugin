@@ -204,8 +204,8 @@ export async function cmdImport(txidArg: string | undefined, voutStr?: string): 
         outputIndex: vout,
         protocol: 'wallet payment',
         paymentRemittance: {
-          derivationPrefix: sdk.Utils.toBase64(Array.from(new TextEncoder().encode('imported'))),
-          derivationSuffix: sdk.Utils.toBase64(Array.from(new TextEncoder().encode(txid.slice(0, 16)))),
+          derivationPrefix: sdk.Utils.toBase64(sdk.Utils.toArray('import', 'utf8')),
+          derivationSuffix: sdk.Utils.toBase64(sdk.Utils.toArray('now', 'utf8')),
           senderIdentityKey: identityKey,
         },
       }],

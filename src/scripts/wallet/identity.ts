@@ -5,6 +5,8 @@
 import fs from 'node:fs';
 import { PATHS } from '../config.js';
 import type { WalletIdentity } from '../types.js';
+import { CachedKeyDeriver, Utils } from '@bsv/sdk';
+import { brc29ProtocolID } from '@bsv/wallet-toolbox';
 
 // Dynamic import for @bsv/sdk
 let _sdk: any = null;
@@ -136,17 +138,17 @@ export async function deriveWalletAddress(privKey: any): Promise<{
   hash160: Uint8Array;
   pubKey: any;
 }> {
-  const sdk = await getSdk();
-  const { NETWORK } = await import('../config.js');
+  
+  const keyDeriver = new CachedKeyDeriver(privKey);
+  const pubKey = keyDeriver.derivePublicKey(
+    brc29ProtocolID,
+    Utils.toBase64(Utils.toArray('import')) + ' ' + Utils.toBase64(Utils.toArray('now')),
+    'self',
+    true
+  );
 
-  const pubKey = privKey.toPublicKey();
-  const pubKeyBytes = pubKey.encode(true);
-  const hash160 = sdk.Hash.hash160(pubKeyBytes);
-  const prefix = NETWORK === 'mainnet' ? 0x00 : 0x6f;
-  const addrPayload = new Uint8Array([prefix, ...hash160]);
-  const checksum = sdk.Hash.hash256(Array.from(addrPayload)).slice(0, 4);
-  const addressBytes = new Uint8Array([...addrPayload, ...checksum]);
-  const address = sdk.Utils.toBase58(Array.from(addressBytes));
+  const address = pubKey.toAddress();
+  const hash160 = Buffer.from(pubKey.toHash());
 
   return { address, hash160, pubKey };
 }
