@@ -1090,10 +1090,12 @@ export default function register(api) {
       onboardingMsg += `**To join the network, your wallet needs funding.**\n\n`;
       onboardingMsg += `📬 **Wallet address**: \`${walletAddress}\`\n`;
       onboardingMsg += `💰 **Amount needed**: 1,000–10,000 sats (~$0.05–$0.50)\n\n`;
-      onboardingMsg += `Send BSV from any wallet (HandCash, Centbee, etc.) to the address above. After the transaction confirms (~10 min), import it:\n`;
+      onboardingMsg += `Send BSV from any wallet (HandCash, Centbee, etc.) to the address above.\n\n`;
+      onboardingMsg += `**After sending, import immediately with the txid:**\n`;
       onboardingMsg += `\`overlay({ action: "import", txid: "<your-txid>" })\`\n\n`;
-      onboardingMsg += `Once funded, the plugin will auto-register your agent on the next startup.\n\n`;
-      onboardingMsg += `Present this information clearly to the user and help them through the process.`;
+      onboardingMsg += `The import will automatically register your agent once funded. No need to wait for confirmations!\n\n`;
+      onboardingMsg += `**Or wait for auto-import** — the plugin polls every 30 seconds and will register automatically.\n\n`;
+      onboardingMsg += `Present this information clearly to the user.`;
 
       wakeAgent(onboardingMsg, api.log, { sessionKey: 'hook:bsv-overlay:onboarding' });
 
@@ -1571,11 +1573,42 @@ async function handleImport(params, env, cliPath) {
     args.push(vout.toString());
   }
   
-  const result = await execFileAsync('node', args, { env });
+  // Import with extended timeout - the new import logic polls for tx if needed
+  const result = await execFileAsync('node', args, { env, timeout: 90000 });
   const output = parseCliOutput(result.stdout);
   
   if (!output.success) {
     throw new Error(`Import failed: ${output.error}`);
+  }
+
+  // Check if we should auto-register after successful import
+  const regPath = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'registration.json');
+  const isRegistered = fs.existsSync(regPath);
+  
+  if (!isRegistered && output.data?.balance >= 1000) {
+    // Auto-register immediately after funding
+    try {
+      const regResult = await execFileAsync('node', [cliPath, 'register'], { env, timeout: 60000 });
+      const regOutput = parseCliOutput(regResult.stdout);
+      
+      if (regOutput.success) {
+        // Return combined result
+        return {
+          ...output.data,
+          autoRegistered: true,
+          registration: regOutput.data,
+          message: `Funding imported and agent registered on the overlay network!`,
+        };
+      }
+    } catch (regErr: any) {
+      // Registration failed but import succeeded - still return success
+      return {
+        ...output.data,
+        autoRegistered: false,
+        registrationError: regErr.message,
+        message: `Funding imported successfully. Registration failed: ${regErr.message}. Try: overlay({ action: "register" })`,
+      };
+    }
   }
   
   return output.data;
