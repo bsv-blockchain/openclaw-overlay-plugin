@@ -138,7 +138,7 @@ export async function cmdRegister(): Promise<never> {
 export async function cmdUnregister(): Promise<never> {
   
   const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR });
-  const { outputs, BEEF } = await wallet._setup.wallet.listOutputs({ basket: TOPICS.IDENTITY });
+  const { outputs, BEEF } = await wallet._setup.wallet.listOutputs({ basket: TOPICS.IDENTITY, include: 'entire transactions' });
 
   const token = new PushDrop(wallet._setup.wallet);
   const unlockingScriptTemplate = await token.unlock([0, PROTOCOL_ID], '1', 'self', 'none', true)
