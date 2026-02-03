@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { OVERLAY_URL, PATHS } from '../config.js';
 import { ok, fail } from '../output.js';
 import { loadIdentity, signRelayMessage } from '../wallet/identity.js';
+import { updateServiceQueueStatus } from '../utils/storage.js';
 
 /**
  * Respond to a service request.
@@ -73,42 +74,18 @@ export async function cmdRespondService(
   });
 
   if (!resp.ok) {
-    // Mark as failed in queue
-    if (fs.existsSync(PATHS.serviceQueue)) {
-      const lines = fs.readFileSync(PATHS.serviceQueue, 'utf-8').trim().split('\n').filter(Boolean);
-      const updated = lines.map(line => {
-        try {
-          const entry = JSON.parse(line);
-          if (entry.requestId === requestId) {
-            return JSON.stringify({
-              ...entry,
-              status: 'failed',
-              failedAt: Date.now(),
-              error: `Relay send failed: ${resp.status}`
-            });
-          }
-          return line;
-        } catch { return line; }
-      });
-      fs.writeFileSync(PATHS.serviceQueue, updated.join('\n') + '\n');
-    }
+    // Mark as failed in queue using atomic update
+    updateServiceQueueStatus(requestId, 'failed', {
+      failedAt: Date.now(),
+      error: `Relay send failed: ${resp.status}`
+    });
     return fail(`Relay send failed: ${resp.status}`);
   }
 
-  // Mark as fulfilled in queue
-  if (fs.existsSync(PATHS.serviceQueue)) {
-    const lines = fs.readFileSync(PATHS.serviceQueue, 'utf-8').trim().split('\n').filter(Boolean);
-    const updated = lines.map(line => {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.requestId === requestId) {
-          return JSON.stringify({ ...entry, status: 'fulfilled', fulfilledAt: Date.now() });
-        }
-        return line;
-      } catch { return line; }
-    });
-    fs.writeFileSync(PATHS.serviceQueue, updated.join('\n') + '\n');
-  }
+  // Mark as fulfilled in queue using atomic update
+  updateServiceQueueStatus(requestId, 'fulfilled', {
+    fulfilledAt: Date.now()
+  });
 
   return ok({ sent: true, requestId, serviceId, to: recipientKey });
 }

@@ -2,6 +2,7 @@
  * Message type handlers and processMessage function.
  */
 
+import fs from 'node:fs';
 import { OVERLAY_URL, WALLET_DIR, PATHS } from '../config.js';
 import { signRelayMessage, verifyRelaySignature, loadWalletIdentity } from '../wallet/identity.js';
 import { loadServices, appendToJsonl } from '../utils/storage.js';
@@ -138,6 +139,30 @@ async function queueForAgent(
   privKey: any,
   serviceId: string
 ): Promise<ProcessMessageResult> {
+  // Check if this request has already been processed to prevent duplicates
+  if (fs.existsSync(PATHS.serviceQueue)) {
+    const lines = fs.readFileSync(PATHS.serviceQueue, 'utf-8').trim().split('\n').filter(Boolean);
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.requestId === msg.id) {
+          // Request already exists in queue - return existing status
+          return {
+            id: msg.id,
+            type: 'service-request',
+            serviceId,
+            action: entry.status === 'pending' ? 'already-queued' : `already-${entry.status}`,
+            paymentAccepted: true,
+            paymentTxid: entry.paymentTxid,
+            satoshisReceived: entry.satoshisReceived,
+            from: msg.from,
+            ack: true,
+          };
+        }
+      } catch {}
+    }
+  }
+
   const sdk = await getSdk();
   const payment = msg.payload?.payment as any;
   const input = msg.payload?.input || msg.payload;
@@ -161,6 +186,23 @@ async function queueForAgent(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: identityKey, to: msg.from, type: 'service-response', payload: rejectPayload, signature: sig }),
     });
+
+    // Also add the rejected entry to the queue for tracking
+    const rejectedEntry = {
+      status: 'rejected',
+      requestId: msg.id,
+      serviceId,
+      from: msg.from,
+      identityKey,
+      input: input,
+      paymentTxid: null,
+      satoshisReceived: 0,
+      walletAccepted: false,
+      error: payResult.error,
+      _ts: Date.now(),
+    };
+    appendToJsonl(PATHS.serviceQueue, rejectedEntry);
+
     return { id: msg.id, type: 'service-request', serviceId, action: 'rejected', reason: payResult.error || 'payment rejected', from: msg.from, ack: true };
   }
 
