@@ -454,10 +454,19 @@ function startBackgroundService(env, cliPath, logger) {
   serviceRunning = true;
 
   // Clean up old request IDs every 5 minutes to prevent memory bloat
-  requestCleanupInterval = setInterval(() => {
+  requestCleanupInterval = setInterval(async () => {
     if (serviceRunning) {
       wokenRequests.clear();
       logger?.debug?.('[bsv-overlay] Cleared stale request IDs');
+
+      // Also clean up old queue entries
+      try {
+        const { cleanupServiceQueue } = await import('./src/scripts/utils/storage.js');
+        cleanupServiceQueue();
+        logger?.debug?.('[bsv-overlay] Cleaned up old queue entries');
+      } catch (err) {
+        logger?.warn?.('[bsv-overlay] Queue cleanup failed:', err.message);
+      }
     }
   }, 5 * 60 * 1000);
   
@@ -483,12 +492,18 @@ function startBackgroundService(env, cliPath, logger) {
           
           // Detect queued-for-agent events — invoke agent via /hooks/agent
           // This is the PROVIDER side: someone requested our service
-          if (event.action === 'queued-for-agent' && event.serviceId) {
+          if ((event.action === 'queued-for-agent' || event.action === 'already-queued') && event.serviceId) {
             const requestId = event.id || `${event.from}-${Date.now()}`;
 
             // Check if already woken to prevent duplicate processing
             if (wokenRequests.has(requestId)) {
               logger?.debug?.(`[bsv-overlay] Request ${requestId} already woken, skipping duplicate`);
+              return;
+            }
+
+            // Skip wake-up for already processed requests unless they're pending
+            if (event.action?.startsWith('already-') && !event.action.includes('pending')) {
+              logger?.debug?.(`[bsv-overlay] Request ${requestId} already processed (${event.action}), skipping`);
               return;
             }
 
@@ -1904,14 +1919,22 @@ async function handleOnboard(env, cliPath) {
 }
 
 async function handlePendingRequests(env, cliPath) {
+  // Clean up old queue entries before checking pending requests
+  try {
+    const { cleanupServiceQueue } = await import('./src/scripts/utils/storage.js');
+    cleanupServiceQueue();
+  } catch (err) {
+    console.error('Queue cleanup failed:', err.message);
+  }
+
   const result = await execFileAsync('node', [cliPath, 'service-queue'], { env });
   const output = parseCliOutput(result.stdout);
   if (!output.success) throw new Error(`Queue check failed: ${output.error}`);
-  
+
   // Clear the alert file since we're checking now
   const alertPath = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'pending-alert.jsonl');
   try { if (fs.existsSync(alertPath)) fs.unlinkSync(alertPath); } catch {}
-  
+
   return output.data;
 }
 

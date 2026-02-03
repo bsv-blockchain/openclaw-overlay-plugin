@@ -145,3 +145,87 @@ export function deleteStoredChange(): void {
     // Ignore if file doesn't exist
   }
 }
+
+/**
+ * Clean up old entries from service queue.
+ * Removes entries older than maxAgeMs or entries with final statuses older than finalStatusMaxAgeMs.
+ */
+export function cleanupServiceQueue(maxAgeMs: number = 24 * 60 * 60 * 1000, finalStatusMaxAgeMs: number = 2 * 60 * 60 * 1000): void {
+  if (!fs.existsSync(PATHS.serviceQueue)) return;
+
+  const now = Date.now();
+  const finalStatuses = ['fulfilled', 'rejected', 'delivery_failed', 'failed', 'error'];
+
+  const lines = fs.readFileSync(PATHS.serviceQueue, 'utf-8').trim().split('\n').filter(Boolean);
+  const keptLines: string[] = [];
+  let removedCount = 0;
+
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      const entryAge = now - (entry._ts || 0);
+
+      // Always keep pending entries that aren't too old
+      if (entry.status === 'pending' && entryAge < maxAgeMs) {
+        keptLines.push(line);
+        continue;
+      }
+
+      // Keep final status entries only if they're recent
+      if (finalStatuses.includes(entry.status) && entryAge < finalStatusMaxAgeMs) {
+        keptLines.push(line);
+        continue;
+      }
+
+      // Remove this entry
+      removedCount++;
+    } catch {
+      // Keep malformed entries to avoid data loss
+      keptLines.push(line);
+    }
+  }
+
+  if (removedCount > 0) {
+    fs.writeFileSync(PATHS.serviceQueue, keptLines.join('\n') + (keptLines.length ? '\n' : ''));
+    console.error(JSON.stringify({ event: 'queue-cleanup', removed: removedCount, kept: keptLines.length }));
+  }
+}
+
+/**
+ * Atomically update a service queue entry status.
+ * Returns true if the entry was found and updated, false otherwise.
+ */
+export function updateServiceQueueStatus(
+  requestId: string,
+  newStatus: string,
+  additionalFields: Record<string, any> = {}
+): boolean {
+  if (!fs.existsSync(PATHS.serviceQueue)) return false;
+
+  const lines = fs.readFileSync(PATHS.serviceQueue, 'utf-8').trim().split('\n').filter(Boolean);
+  let updated = false;
+
+  const updatedLines = lines.map(line => {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.requestId === requestId) {
+        updated = true;
+        return JSON.stringify({
+          ...entry,
+          status: newStatus,
+          ...additionalFields,
+          updatedAt: Date.now()
+        });
+      }
+      return line;
+    } catch {
+      return line;
+    }
+  });
+
+  if (updated) {
+    fs.writeFileSync(PATHS.serviceQueue, updatedLines.join('\n') + '\n');
+  }
+
+  return updated;
+}
