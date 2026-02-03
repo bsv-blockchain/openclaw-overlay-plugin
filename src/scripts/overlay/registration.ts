@@ -15,6 +15,7 @@ import { NETWORK, WALLET_DIR, OVERLAY_URL, PROTOCOL_ID, TOPICS, PATHS, AGENT_NAM
 import { ok, fail } from '../output.js';
 import { loadRegistration, saveRegistration, deleteRegistration, loadServices } from '../utils/storage.js';
 import { buildRealOverlayTransaction } from './transaction.js';
+import { Transaction, Beef, Script, PushDrop, WalletOutput } from '@bsv/sdk'
 
 import { BSVAgentWallet } from '../../core/index.js';
 
@@ -135,48 +136,63 @@ export async function cmdRegister(): Promise<never> {
  * Unregister command: submit revocation tx to remove agent from overlay network.
  */
 export async function cmdUnregister(): Promise<never> {
-  const existingReg = loadRegistration();
-  if (!existingReg) {
-    return fail('Not registered');
-  }
-
-  if (!fs.existsSync(PATHS.walletIdentity)) {
-    return fail('Wallet not initialized. Cannot sign revocation.');
-  }
-
-  const BSVAgentWallet = await getBSVAgentWallet();
+  
   const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR });
-  const identityKey = await wallet.getIdentityKey();
-  await wallet.destroy();
+  const { outputs, BEEF } = await wallet._setup.wallet.listOutputs({ basket: TOPICS.IDENTITY });
 
-  // Verify we're unregistering the correct identity
-  if (identityKey !== existingReg.identityKey) {
-    return fail(`Identity mismatch: wallet has ${identityKey}, registration has ${existingReg.identityKey}`);
+  const token = new PushDrop(wallet._setup.wallet);
+  const unlockingScriptTemplate = await token.unlock([0, PROTOCOL_ID], '1', 'self', 'none', true)
+  const tempTx = new Transaction()
+  const beef = Beef.fromBinary(BEEF as number[])
+  outputs.forEach((o: WalletOutput) => {
+    const [txid, v] = o.outpoint.split('.')
+    const sourceOutputIndex = Number(v)
+    const sourceTransaction = beef.findTransactionForSigning(txid)
+    tempTx.addInput({
+      unlockingScriptTemplate,
+      sourceOutputIndex,
+      sourceTransaction
+    })
+  })
+  tempTx.addOutput({
+    lockingScript: Script.fromASM('OP_FALSE OP_RETURN 330123'),
+    satoshis: 0
+  })
+
+  await tempTx.sign()
+
+  const response = await wallet._setup.wallet.createAction({
+    description: 'revoke registration token',
+    inputs: outputs.map((o, idx) => ({
+      inputDescription: 'previous registration',
+      outpoint: o.outpoint,
+      unlockingScript: (tempTx.inputs[idx].unlockingScript as Script).toHex()
+    }))
+  })
+
+  const txid = response.txid as string;
+
+  // --- Submit to overlay ---
+  // Use binary BEEF with X-Topics header (matches clawdbot-overlay server API)
+  const submitResp = await fetch(`${OVERLAY_URL}/submit`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-Topics': JSON.stringify([TOPICS.IDENTITY]),
+    },
+    body: new Uint8Array(response.tx as number[]),
+  });
+
+  if (!submitResp.ok) {
+    const errText = await submitResp.text();
+    throw new Error(`Overlay submission failed: ${submitResp.status} — ${errText}`);
   }
-
-  // Submit revocation transaction to overlay
-  const revocationPayload = {
-    protocol: PROTOCOL_ID,
-    type: 'identity-revocation' as const,
-    identityKey,
-    reason: 'Agent unregistered by owner',
-    timestamp: new Date().toISOString(),
-  };
-
-  let revocationResult: { txid: string; funded: string };
-  try {
-    revocationResult = await buildRealOverlayTransaction(revocationPayload, TOPICS.IDENTITY);
-  } catch (err: any) {
-    return fail(`Unregistration failed: ${err.message}`);
-  }
-
+  
   // Delete local registration
   deleteRegistration();
 
   return ok({
     unregistered: true,
-    identityKey,
-    revocationTxid: revocationResult.txid,
-    funded: revocationResult.funded,
+    txid
   });
 }
