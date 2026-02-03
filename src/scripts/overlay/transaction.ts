@@ -54,7 +54,7 @@ async function getSdk(): Promise<any> {
  * @param sdk - The @bsv/sdk module
  * @returns A proper Script object that the SDK can serialize
  */
-export async function buildPushDropScript(wallet: BSVAgentWallet, payload: OverlayPayload): string {
+export async function buildPushDropScript(wallet: BSVAgentWallet, payload: OverlayPayload): Promise<string> {
   const jsonBytes = Utils.toArray(JSON.stringify(payload), 'utf8')
   const fields: number[][] = [jsonBytes]
   const token = new PushDrop(wallet._setup.wallet);
@@ -74,7 +74,7 @@ export async function buildRealOverlayTransaction(
 ): Promise<{ txid: string; funded: string; explorer: string }> {
   
   const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR })
-  const lockingScript = buildPushDropScript(wallet, payload)
+  const lockingScript = await buildPushDropScript(wallet, payload)
 
   const response = await wallet._setup.wallet.createAction({
     description: 'topic manager submission',
