@@ -29,6 +29,29 @@ export async function cmdRespondService(
 
   const { identityKey, privKey } = await loadIdentity();
 
+  // Check if already processed before sending response (idempotency)
+  if (fs.existsSync(PATHS.serviceQueue)) {
+    const lines = fs.readFileSync(PATHS.serviceQueue, 'utf-8').trim().split('\n').filter(Boolean);
+    const finalStatuses = ['fulfilled', 'rejected', 'delivery_failed', 'failed', 'error'];
+
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.requestId === requestId && finalStatuses.includes(entry.status)) {
+          return ok({
+            sent: false,
+            requestId,
+            serviceId,
+            to: recipientKey,
+            message: `Request already processed with status: ${entry.status}`,
+            alreadyProcessed: true,
+            previousStatus: entry.status
+          });
+        }
+      } catch {}
+    }
+  }
+
   const responsePayload = {
     requestId,
     serviceId,
@@ -49,7 +72,28 @@ export async function cmdRespondService(
     }),
   });
 
-  if (!resp.ok) return fail(`Relay send failed: ${resp.status}`);
+  if (!resp.ok) {
+    // Mark as failed in queue
+    if (fs.existsSync(PATHS.serviceQueue)) {
+      const lines = fs.readFileSync(PATHS.serviceQueue, 'utf-8').trim().split('\n').filter(Boolean);
+      const updated = lines.map(line => {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.requestId === requestId) {
+            return JSON.stringify({
+              ...entry,
+              status: 'failed',
+              failedAt: Date.now(),
+              error: `Relay send failed: ${resp.status}`
+            });
+          }
+          return line;
+        } catch { return line; }
+      });
+      fs.writeFileSync(PATHS.serviceQueue, updated.join('\n') + '\n');
+    }
+    return fail(`Relay send failed: ${resp.status}`);
+  }
 
   // Mark as fulfilled in queue
   if (fs.existsSync(PATHS.serviceQueue)) {
