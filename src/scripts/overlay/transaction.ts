@@ -81,12 +81,15 @@ export async function buildRealOverlayTransaction(
   
   const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR })
   const opReturnScript = buildOpReturnScript(payload);
+  
+  // Convert Script to hex string (createAction expects hex, not Script object)
+  const lockingScriptHex = opReturnScript.toHex();
 
   const response = await wallet._setup.wallet.createAction({
     description: 'topic manager submission',
     outputs: [
       {
-        lockingScript: opReturnScript,
+        lockingScript: lockingScriptHex,
         satoshis: 0,
         outputDescription: 'overlay',
       }
