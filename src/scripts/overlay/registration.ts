@@ -162,11 +162,12 @@ export async function cmdUnregister(): Promise<never> {
   await tempTx.sign()
 
   const response = await wallet._setup.wallet.createAction({
+    inputBEEF: BEEF,
     description: 'revoke registration token',
-    inputs: outputs.map((o, idx) => ({
+    inputs: tempTx.inputs.map(o => ({
       inputDescription: 'previous registration',
-      outpoint: o.outpoint,
-      unlockingScript: (tempTx.inputs[idx].unlockingScript as Script).toHex()
+      outpoint: o.sourceTXID + '.' + String(o.sourceOutputIndex),
+      unlockingScript: o.unlockingScript?.toHex() as string
     }))
   })
 
