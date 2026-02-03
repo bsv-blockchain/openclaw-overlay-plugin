@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import { NETWORK, WALLET_DIR, PATHS } from '../config.js';
 import { ok, fail } from '../output.js';
-import { loadWalletIdentity, deriveWalletAddress } from './identity.js';
+import { loadWalletIdentity, deriveWalletKeys } from './identity.js';
 import { wocFetch, fetchBeefFromWoC, getExplorerBaseUrl } from '../utils/woc.js';
 import { buildMerklePathFromTSC } from '../utils/merkle.js';
 import { loadStoredChange, deleteStoredChange } from '../utils/storage.js';
@@ -71,8 +71,8 @@ export async function cmdBalance(): Promise<never> {
   let onChain: { address: string; confirmed: number; unconfirmed: number } | null = null;
   try {
     const identity = loadWalletIdentity();
-    const privKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
-    const { address } = await deriveWalletAddress(privKey);
+    const rootPrivKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
+    const { address } = await deriveWalletKeys(rootPrivKey);
 
     const resp = await wocFetch(`/address/${address}/balance`);
     if (resp.ok) {
@@ -295,8 +295,8 @@ export async function cmdRefund(targetAddress: string | undefined): Promise<neve
 
   const sdk = await getSdk();
   const identity = loadWalletIdentity();
-  const privKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
-  const { address: sourceAddress, hash160 } = await deriveWalletAddress(privKey);
+  const rootPrivKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
+  const { address: sourceAddress, hash160, childPrivKey } = await deriveWalletKeys(rootPrivKey);
 
   // Refund sweeps all funds — needs WoC to discover all UTXOs (manual command)
   const utxoResp = await wocFetch(`/address/${sourceAddress}/unspent`);
@@ -343,7 +343,7 @@ export async function cmdRefund(targetAddress: string | undefined): Promise<neve
     tx.addInput({
       sourceTransaction: storedBeefTx.tx,
       sourceOutputIndex: storedBeefTx.stored.vout,
-      unlockingScriptTemplate: new sdk.P2PKH().unlock(privKey),
+      unlockingScriptTemplate: new sdk.P2PKH().unlock(childPrivKey),
     });
     totalInput += storedBeefTx.stored.satoshis;
     storedBeefIncluded = true;
@@ -361,7 +361,7 @@ export async function cmdRefund(targetAddress: string | undefined): Promise<neve
     tx.addInput({
       sourceTransaction: srcTx,
       sourceOutputIndex: utxo.tx_pos,
-      unlockingScriptTemplate: new sdk.P2PKH().unlock(privKey),
+      unlockingScriptTemplate: new sdk.P2PKH().unlock(childPrivKey),
     });
     totalInput += utxo.value;
   }

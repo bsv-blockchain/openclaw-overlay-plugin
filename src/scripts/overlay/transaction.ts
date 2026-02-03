@@ -9,7 +9,7 @@
 import { NETWORK, OVERLAY_URL, PROTOCOL_ID } from '../config.js';
 import { wocFetch, fetchBeefFromWoC } from '../utils/woc.js';
 import { loadStoredChange, saveStoredChange, deleteStoredChange } from '../utils/storage.js';
-import { loadWalletIdentity, deriveWalletAddress } from '../wallet/identity.js';
+import { loadWalletIdentity, deriveWalletKeys } from '../wallet/identity.js';
 import type { OverlayPayload, SourceChainEntry } from '../types.js';
 
 // Dynamic import for @bsv/sdk
@@ -80,8 +80,8 @@ export async function buildRealOverlayTransaction(
 ): Promise<{ txid: string; funded: string; explorer: string }> {
   const sdk = await getSdk();
   const identity = loadWalletIdentity();
-  const privKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
-  const { address, hash160 } = await deriveWalletAddress(privKey);
+  const rootPrivKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
+  const { address, hash160, childPrivKey } = await deriveWalletKeys(rootPrivKey);
 
   // OP_RETURN outputs should have 0 satoshis (they're unspendable)
   const OP_RETURN_SATS = 0;
@@ -161,7 +161,7 @@ export async function buildRealOverlayTransaction(
   tx.addInput({
     sourceTransaction: sourceTx,
     sourceOutputIndex: sourceVout,
-    unlockingScriptTemplate: new sdk.P2PKH().unlock(privKey),
+    unlockingScriptTemplate: new sdk.P2PKH().unlock(childPrivKey),
   });
 
   // OP_RETURN output with 0 satoshis

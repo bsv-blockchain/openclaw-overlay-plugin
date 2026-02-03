@@ -132,6 +132,12 @@ export async function verifyRelaySignature(
 
 /**
  * Derive wallet address components from a private key.
+ * 
+ * IMPORTANT: This uses BRC-29 key derivation to create a child key.
+ * Any transactions spending to this address MUST use the matching
+ * child private key for signing, NOT the root key.
+ * 
+ * Use deriveWalletKeys() to get both the address and signing key.
  */
 export async function deriveWalletAddress(privKey: any): Promise<{
   address: string;
@@ -151,4 +157,47 @@ export async function deriveWalletAddress(privKey: any): Promise<{
   const hash160 = Buffer.from(pubKey.toHash());
 
   return { address, hash160, pubKey };
+}
+
+/**
+ * Derive wallet keys for both address AND transaction signing.
+ * 
+ * CRITICAL: Use this function to get the child private key for signing
+ * transactions that spend from the derived address. Do NOT use the
+ * root private key - it will cause signature verification failures!
+ * 
+ * @param rootPrivKey - Root private key from wallet identity
+ * @returns Object with address, hash160, and CHILD private key for signing
+ */
+export async function deriveWalletKeys(rootPrivKey: any): Promise<{
+  address: string;
+  hash160: Uint8Array;
+  pubKey: any;
+  childPrivKey: any;
+}> {
+  const keyDeriver = new CachedKeyDeriver(rootPrivKey);
+  
+  const derivationPrefix = Utils.toBase64(Utils.toArray('import'));
+  const derivationSuffix = Utils.toBase64(Utils.toArray('now'));
+  const keyString = `${derivationPrefix} ${derivationSuffix}`;
+  
+  // Derive child private key (for signing)
+  const childPrivKey = keyDeriver.derivePrivateKey(
+    brc29ProtocolID,
+    keyString,
+    'self'
+  );
+  
+  // Derive child public key (for address)
+  const pubKey = keyDeriver.derivePublicKey(
+    brc29ProtocolID,
+    keyString,
+    'self',
+    true
+  );
+
+  const address = pubKey.toAddress();
+  const hash160 = Buffer.from(pubKey.toHash());
+
+  return { address, hash160, pubKey, childPrivKey };
 }
