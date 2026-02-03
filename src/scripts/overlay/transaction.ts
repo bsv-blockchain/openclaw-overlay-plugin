@@ -79,7 +79,7 @@ export async function buildRealOverlayTransaction(
   topic: string
 ): Promise<{ txid: string; funded: string; explorer: string }> {
   
-  const wallet = await BSVAgentWallet.create({ network: NETWORK, storageDir: WALLET_DIR })
+  const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR })
   const opReturnScript = buildOpReturnScript(payload);
 
   const response = await wallet._setup.wallet.createAction({

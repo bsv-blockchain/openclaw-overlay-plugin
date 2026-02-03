@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import { NETWORK, WALLET_DIR, PATHS } from '../config.js';
 import { ok, fail } from '../output.js';
-import { loadWalletIdentity, deriveWalletKeys } from './identity.js';
+import { loadWalletIdentity } from './identity.js';
 import { wocFetch, fetchBeefFromWoC, getExplorerBaseUrl } from '../utils/woc.js';
 import { buildMerklePathFromTSC } from '../utils/merkle.js';
 import { loadStoredChange, deleteStoredChange } from '../utils/storage.js';
@@ -67,27 +67,7 @@ export async function cmdBalance(): Promise<never> {
   const total = await wallet.getBalance();
   await wallet.destroy();
 
-  // Also check on-chain balance via WoC for completeness
-  let onChain: { address: string; confirmed: number; unconfirmed: number } | null = null;
-  try {
-    const identity = loadWalletIdentity();
-    const rootPrivKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
-    const { address } = await deriveWalletKeys(rootPrivKey);
-
-    const resp = await wocFetch(`/address/${address}/balance`);
-    if (resp.ok) {
-      const bal = await resp.json();
-      onChain = {
-        address,
-        confirmed: bal.confirmed,
-        unconfirmed: bal.unconfirmed,
-      };
-    }
-  } catch {
-    // Non-fatal
-  }
-
-  return ok({ walletBalance: total, onChain });
+  return ok({ walletBalance: total });
 }
 
 /**
@@ -284,7 +264,7 @@ export async function cmdImport(txidArg: string | undefined, voutStr?: string): 
 /**
  * Refund command: sweep wallet to an address.
  */
-export async function cmdRefund(targetAddress: string | undefined): Promise<never> {
+export async function cmdRefund(targetAddress: string | undefined): Promise<void> {
   if (!targetAddress) {
     return fail('Usage: refund <address>');
   }
@@ -293,129 +273,5 @@ export async function cmdRefund(targetAddress: string | undefined): Promise<neve
     return fail('Wallet not initialized. Run: setup');
   }
 
-  const sdk = await getSdk();
-  const identity = loadWalletIdentity();
-  const rootPrivKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
-  const { address: sourceAddress, hash160, childPrivKey } = await deriveWalletKeys(rootPrivKey);
-
-  // Refund sweeps all funds — needs WoC to discover all UTXOs (manual command)
-  const utxoResp = await wocFetch(`/address/${sourceAddress}/unspent`);
-  if (!utxoResp.ok) {
-    return fail(`Failed to fetch UTXOs: ${utxoResp.status}`);
-  }
-  const utxos = await utxoResp.json();
-  if (!utxos || utxos.length === 0) {
-    return fail(`No UTXOs found for ${sourceAddress}`);
-  }
-
-  // Also include stored BEEF change if available (may not be on-chain yet)
-  const storedChange = loadStoredChange();
-  let storedBeefTx: { stored: any; tx: any } | null = null;
-  let storedBeefIncluded = false;
-
-  if (storedChange && storedChange.satoshis > 0 && !utxos.some((u: any) => u.tx_hash === storedChange.txid)) {
-    try {
-      // Reconstruct tx from stored chain
-      const tx = sdk.Transaction.fromHex(storedChange.txHex);
-      if (storedChange.sourceChain && storedChange.sourceChain.length > 0) {
-        let childTx = tx;
-        for (const entry of storedChange.sourceChain) {
-          const srcTx = sdk.Transaction.fromHex(entry.txHex);
-          if (entry.merklePathHex) {
-            const mpBytes = entry.merklePathHex.match(/.{2}/g)!.map((h: string) => parseInt(h, 16));
-            srcTx.merklePath = sdk.MerklePath.fromBinary(mpBytes);
-          }
-          childTx.inputs[0].sourceTransaction = srcTx;
-          childTx = srcTx;
-        }
-      }
-      storedBeefTx = { stored: storedChange, tx };
-    } catch {
-      // Ignore errors reconstructing stored change
-    }
-  }
-
-  const tx = new sdk.Transaction();
-  let totalInput = 0;
-
-  // Add stored BEEF input first (has full source chain, no WoC needed)
-  if (storedBeefTx) {
-    tx.addInput({
-      sourceTransaction: storedBeefTx.tx,
-      sourceOutputIndex: storedBeefTx.stored.vout,
-      unlockingScriptTemplate: new sdk.P2PKH().unlock(childPrivKey),
-    });
-    totalInput += storedBeefTx.stored.satoshis;
-    storedBeefIncluded = true;
-  }
-
-  // Add WoC UTXOs
-  const sourceTxCache: Record<string, string> = {};
-  for (const utxo of utxos) {
-    if (!sourceTxCache[utxo.tx_hash]) {
-      const txResp = await wocFetch(`/tx/${utxo.tx_hash}/hex`);
-      if (!txResp.ok) continue; // skip on error, non-fatal for sweep
-      sourceTxCache[utxo.tx_hash] = await txResp.text();
-    }
-    const srcTx = sdk.Transaction.fromHex(sourceTxCache[utxo.tx_hash]);
-    tx.addInput({
-      sourceTransaction: srcTx,
-      sourceOutputIndex: utxo.tx_pos,
-      unlockingScriptTemplate: new sdk.P2PKH().unlock(childPrivKey),
-    });
-    totalInput += utxo.value;
-  }
-
-  if (totalInput === 0) {
-    return fail('No spendable funds found');
-  }
-
-  const targetDecoded = sdk.Utils.fromBase58(targetAddress);
-  const targetHash160 = targetDecoded.slice(1, 21);
-  tx.addOutput({
-    lockingScript: new sdk.P2PKH().lock(targetHash160),
-    satoshis: totalInput,
-  });
-
-  const inputCount = tx.inputs.length;
-  const estimatedSize = inputCount * 148 + 34 + 10;
-  const fee = Math.max(Math.ceil(estimatedSize / 1000), 100);
-  if (totalInput <= fee) {
-    return fail(`Total value (${totalInput} sats) ≤ fee (${fee} sats)`);
-  }
-  tx.outputs[0].satoshis = totalInput - fee;
-
-  await tx.sign();
-  const txid = tx.id('hex');
-
-  // Broadcast (required for refund — funds leave the overlay)
-  const broadcastResp = await wocFetch(`/tx/raw`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ txhex: tx.toHex() }),
-  });
-
-  if (!broadcastResp.ok) {
-    const errText = await broadcastResp.text();
-    return fail(`Broadcast failed: ${broadcastResp.status} — ${errText}`);
-  }
-
-  // Clear stored BEEF since we swept everything
-  deleteStoredChange();
-
-  const broadcastResult = await broadcastResp.text();
-  const explorerBase = getExplorerBaseUrl();
-
-  return ok({
-    txid: broadcastResult.replace(/"/g, '').trim(),
-    satoshisSent: totalInput - fee,
-    fee,
-    inputCount,
-    totalInput,
-    from: sourceAddress,
-    to: targetAddress,
-    storedBeefIncluded,
-    network: NETWORK,
-    explorer: `${explorerBase}/tx/${txid}`,
-  });
+  // TODO IMPLEMENT THIS
 }
