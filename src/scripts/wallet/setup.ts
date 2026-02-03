@@ -67,7 +67,7 @@ export async function cmdSetup(): Promise<never> {
   }
 
   fs.mkdirSync(WALLET_DIR, { recursive: true });
-  const wallet = await BSVAgentWallet.create({ network: NETWORK, storageDir: WALLET_DIR });
+  const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR });
   const identityKey = await wallet.getIdentityKey();
   await wallet.destroy();
 

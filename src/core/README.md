@@ -24,12 +24,12 @@ npm install @a2a-bsv/core
 import { BSVAgentWallet } from '@a2a-bsv/core';
 
 // 1. Create wallets for two agents
-const agentA = await BSVAgentWallet.create({
+const agentA = await BSVAgentWallet.load({
   network: 'testnet',
   storageDir: './wallet-agent-a',
 });
 
-const agentB = await BSVAgentWallet.create({
+const agentB = await BSVAgentWallet.load({
   network: 'testnet',
   storageDir: './wallet-agent-b',
 });
@@ -74,7 +74,7 @@ await agentB.destroy();
 
 | Method | Description |
 |--------|-------------|
-| `BSVAgentWallet.create(config)` | Create a new wallet (generates keys, creates SQLite DB) |
+| `BSVAgentWallet.load(config)` | Create a new wallet (generates keys, creates SQLite DB) |
 | `BSVAgentWallet.load(config)` | Load an existing wallet from storage |
 
 #### `WalletConfig`

@@ -43,7 +43,7 @@ const IDENTITY_FILE = 'wallet-identity.json';
  * Usage:
  * ```ts
  * // Create a new wallet (generates keys)
- * const wallet = await BSVAgentWallet.create({ network: 'testnet', storageDir: './agent-wallet' });
+ * const wallet = await BSVAgentWallet.load({ network: 'testnet', storageDir: './agent-wallet' });
  *
  * // Load an existing wallet
  * const wallet = await BSVAgentWallet.load({ network: 'testnet', storageDir: './agent-wallet' });
@@ -74,7 +74,7 @@ export class BSVAgentWallet {
    * Create a new agent wallet. Generates a fresh root key and persists it.
    * The SQLite database and identity file are written to `config.storageDir`.
    */
-  static async create(config: WalletConfig): Promise<BSVAgentWallet> {
+  private static async create(config: WalletConfig): Promise<BSVAgentWallet> {
     // Generate a new root key (or use one provided in config)
     const rootKeyHex = config.rootKeyHex ?? PrivateKey.fromRandom().toHex();
     const rootKey = PrivateKey.fromHex(rootKeyHex);
@@ -105,10 +105,7 @@ export class BSVAgentWallet {
   static async load(config: WalletConfig): Promise<BSVAgentWallet> {
     const identityPath = path.join(config.storageDir, IDENTITY_FILE);
     if (!fs.existsSync(identityPath)) {
-      throw new Error(
-        `No wallet found at ${config.storageDir}. ` +
-        `Use BSVAgentWallet.create() to initialize a new wallet.`
-      );
+      return this.create(config);
     }
 
     const identity: WalletIdentity = JSON.parse(

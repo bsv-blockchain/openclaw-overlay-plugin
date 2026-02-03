@@ -64,10 +64,10 @@ async function run() {
 
   // ── Wallet creation ──────────────────────────────────────────────────
 
-  await test('BSVAgentWallet.create creates a wallet and identity file', async () => {
+  await test('BSVAgentWallet.load creates a wallet and identity file', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-test-'));
     try {
-      const wallet = await BSVAgentWallet.create({
+      const wallet = await BSVAgentWallet.load({
         network: 'testnet',
         storageDir: tmpDir,
       });
@@ -97,7 +97,7 @@ async function run() {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-test-'));
     try {
       // Create first
-      const wallet1 = await BSVAgentWallet.create({
+      const wallet1 = await BSVAgentWallet.load({
         network: 'testnet',
         storageDir: tmpDir,
       });
@@ -132,7 +132,7 @@ async function run() {
   await test('createPayment rejects address (requires pubkey)', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2a-test-'));
     try {
-      const wallet = await BSVAgentWallet.create({
+      const wallet = await BSVAgentWallet.load({
         network: 'testnet',
         storageDir: tmpDir,
       });

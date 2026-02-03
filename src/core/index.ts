@@ -8,7 +8,7 @@
  * ```ts
  * import { BSVAgentWallet } from '@a2a-bsv/core';
  *
- * const wallet = await BSVAgentWallet.create({
+ * const wallet = await BSVAgentWallet.load({
  *   network: 'testnet',
  *   storageDir: './my-agent-wallet',
  * });
