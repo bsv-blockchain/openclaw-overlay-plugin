@@ -133,7 +133,7 @@ export async function cmdRegister(): Promise<never> {
 }
 
 /**
- * Unregister command: remove local registration (does not delete on-chain records).
+ * Unregister command: submit revocation tx to remove agent from overlay network.
  */
 export async function cmdUnregister(): Promise<never> {
   const existingReg = loadRegistration();
@@ -141,11 +141,43 @@ export async function cmdUnregister(): Promise<never> {
     return fail('Not registered');
   }
 
+  if (!fs.existsSync(PATHS.walletIdentity)) {
+    return fail('Wallet not initialized. Cannot sign revocation.');
+  }
+
+  const BSVAgentWallet = await getBSVAgentWallet();
+  const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR });
+  const identityKey = await wallet.getIdentityKey();
+  await wallet.destroy();
+
+  // Verify we're unregistering the correct identity
+  if (identityKey !== existingReg.identityKey) {
+    return fail(`Identity mismatch: wallet has ${identityKey}, registration has ${existingReg.identityKey}`);
+  }
+
+  // Submit revocation transaction to overlay
+  const revocationPayload = {
+    protocol: PROTOCOL_ID,
+    type: 'identity-revocation' as const,
+    identityKey,
+    reason: 'Agent unregistered by owner',
+    timestamp: new Date().toISOString(),
+  };
+
+  let revocationResult: { txid: string; funded: string };
+  try {
+    revocationResult = await buildRealOverlayTransaction(revocationPayload, TOPICS.IDENTITY);
+  } catch (err: any) {
+    return fail(`Unregistration failed: ${err.message}`);
+  }
+
+  // Delete local registration
   deleteRegistration();
 
   return ok({
     unregistered: true,
-    identityKey: existingReg.identityKey,
-    note: 'Local registration removed. On-chain records remain (blockchain is immutable).',
+    identityKey,
+    revocationTxid: revocationResult.txid,
+    funded: revocationResult.funded,
   });
 }
