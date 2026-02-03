@@ -7,6 +7,7 @@ import { OVERLAY_URL, WALLET_DIR, PATHS } from '../config.js';
 import { signRelayMessage, verifyRelaySignature, loadWalletIdentity } from '../wallet/identity.js';
 import { loadServices, appendToJsonl } from '../utils/storage.js';
 import { fetchWithTimeout } from '../utils/woc.js';
+import { serviceManager } from '../../services/index.js';
 import type { RelayMessage, ProcessMessageResult } from '../types.js';
 
 // Dynamic import for @bsv/sdk (needed for hash160 computation)
@@ -171,10 +172,62 @@ async function queueForAgent(
   const walletIdentity = loadWalletIdentity();
   const ourHash160 = sdk.Hash.hash160(sdk.PrivateKey.fromHex(walletIdentity.rootKeyHex).toPublicKey().encode(true));
 
-  // Find the service price
-  const services = loadServices();
-  const svc = services.find(s => s.serviceId === serviceId);
-  const minPrice = svc?.priceSats || 5;
+  // Find the service price using the service registry
+  const serviceDefinition = serviceManager.registry.get(serviceId);
+  let minPrice = 5; // default fallback
+
+  if (serviceDefinition) {
+    minPrice = serviceDefinition.defaultPrice;
+
+    // Validate service input if possible
+    const validation = serviceManager.validate(serviceId, input);
+    if (!validation.valid) {
+      // Send validation rejection
+      const rejectPayload = {
+        requestId: msg.id,
+        serviceId,
+        status: 'rejected',
+        reason: `Input validation failed: ${validation.error}`
+      };
+      const sig = await signRelayMessage(privKey, msg.from, 'service-response', rejectPayload);
+      await fetchWithTimeout(`${OVERLAY_URL}/relay/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: identityKey, to: msg.from, type: 'service-response', payload: rejectPayload, signature: sig }),
+      });
+
+      // Also add the rejected entry to the queue for tracking
+      const rejectedEntry = {
+        status: 'rejected',
+        requestId: msg.id,
+        serviceId,
+        from: msg.from,
+        identityKey,
+        input: input,
+        paymentTxid: null,
+        satoshisReceived: 0,
+        walletAccepted: false,
+        error: validation.error,
+        _ts: Date.now(),
+      };
+      appendToJsonl(PATHS.serviceQueue, rejectedEntry);
+
+      return {
+        id: msg.id,
+        type: 'service-request',
+        serviceId,
+        action: 'rejected',
+        reason: validation.error || 'input validation failed',
+        from: msg.from,
+        ack: true
+      };
+    }
+  } else {
+    // Fall back to legacy service loading for backward compatibility
+    const services = loadServices();
+    const svc = services.find(s => s.serviceId === serviceId);
+    minPrice = svc?.priceSats || 5;
+  }
 
   const payResult = await verifyAndAcceptPayment(payment, minPrice, msg.from, serviceId, ourHash160);
   if (!payResult.accepted) {

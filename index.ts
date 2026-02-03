@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { initializeServiceSystem, serviceManager } from './src/services/index.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -26,59 +27,6 @@ let requestCleanupInterval: any = null;
 // Budget tracking
 const BUDGET_FILE = 'daily-spending.json';
 
-// Predefined service templates for auto-advertising
-const PREDEFINED_SERVICES: Record<string, { name: string; description: string; priceSats: number }> = {
-  'tell-joke': {
-    name: 'Random Joke',
-    description: 'Get a random joke. Guaranteed to be at least mildly amusing.',
-    priceSats: 5
-  },
-  'code-review': {
-    name: 'Code Review',
-    description: 'Thorough code review covering bugs, security issues, style, performance, and improvement suggestions.',
-    priceSats: 50
-  },
-  'web-research': {
-    name: 'Web Research',
-    description: 'Research any topic using current web sources. Returns a synthesized summary with cited sources.',
-    priceSats: 50
-  },
-  'translate': {
-    name: 'Translation',
-    description: 'Translate text between 30+ languages. Accurate, context-aware translations.',
-    priceSats: 20
-  },
-  'summarize': {
-    name: 'Summarize',
-    description: 'Summarize long text, articles, or documents into concise bullet points.',
-    priceSats: 20
-  },
-  'api-proxy': {
-    name: 'API Proxy',
-    description: 'Proxy HTTP requests to external APIs. Input: {url, method, headers, body}.',
-    priceSats: 15
-  },
-  'roulette': {
-    name: 'Roulette',
-    description: 'European roulette (single zero). Bet on: number 0-36, red/black, odd/even, high/low.',
-    priceSats: 10
-  },
-  'memory-store': {
-    name: 'Memory Store',
-    description: 'Persistent key-value storage for agents. Operations: set, get, delete, list.',
-    priceSats: 10
-  },
-  'code-develop': {
-    name: 'Code Development',
-    description: 'Generate code from requirements. Specify language, task description, and constraints.',
-    priceSats: 100
-  },
-  'image-analysis': {
-    name: 'Image Analysis',
-    description: 'Analyze and describe images. Identify objects, text, scenes, and more.',
-    priceSats: 30
-  }
-};
 
 interface DailySpending {
   date: string; // YYYY-MM-DD
@@ -248,26 +196,26 @@ async function autoAdvertiseServices(env, cliPath, logger) {
     const failed: string[] = [];
     
     for (const serviceId of servicesToAdvertise) {
-      const serviceInfo = PREDEFINED_SERVICES[serviceId];
+      const serviceInfo = serviceManager.registry.get(serviceId);
       if (!serviceInfo) {
         logger?.warn?.(`[bsv-overlay] Unknown service ID: ${serviceId}. Skipping.`);
         failed.push(serviceId);
         continue;
       }
-      
+
       try {
         const result = await execFileAsync('node', [
           cliPath, 'advertise',
           serviceId,
           serviceInfo.name,
-          serviceInfo.priceSats.toString(),
+          serviceInfo.defaultPrice.toString(),
           serviceInfo.description
         ], { env, timeout: 60000 });
-        
+
         const output = parseCliOutput(result.stdout);
         if (output.success) {
           advertised.push(serviceId);
-          logger?.info?.(`[bsv-overlay] Advertised service: ${serviceInfo.name} (${serviceId}) for ${serviceInfo.priceSats} sats`);
+          logger?.info?.(`[bsv-overlay] Advertised service: ${serviceInfo.name} (${serviceId}) for ${serviceInfo.defaultPrice} sats`);
         } else {
           failed.push(serviceId);
           logger?.warn?.(`[bsv-overlay] Failed to advertise ${serviceId}: ${output.error}`);
@@ -281,8 +229,8 @@ async function autoAdvertiseServices(env, cliPath, logger) {
     // Wake agent with results
     if (advertised.length > 0) {
       const serviceList = advertised.map(id => {
-        const info = PREDEFINED_SERVICES[id];
-        return `• ${info?.name || id} (${info?.priceSats || '?'} sats)`;
+        const info = serviceManager.registry.get(id);
+        return `• ${info?.name || id} (${info?.defaultPrice || '?'} sats)`;
       }).join('\n');
       
       wakeAgent(
@@ -960,10 +908,9 @@ export default function register(api) {
           console.log('\n' + '─'.repeat(50));
           console.log('Step 2: Services to Offer\n');
           console.log('Available services:');
-          const serviceIds = Object.keys(PREDEFINED_SERVICES);
-          serviceIds.forEach((id, i) => {
-            const svc = PREDEFINED_SERVICES[id];
-            console.log(`  ${i + 1}. ${svc.name} (${svc.priceSats} sats) - ${id}`);
+          const availableServices = serviceManager.getAvailableServices();
+          availableServices.forEach((svc, i) => {
+            console.log(`  ${i + 1}. ${svc.name} (${svc.defaultPrice} sats) - ${svc.id}`);
           });
           console.log('\nEnter service numbers separated by commas (e.g., 1,2,5)');
           console.log('Or press Enter to skip service selection.\n');
@@ -973,8 +920,8 @@ export default function register(api) {
           if (serviceInput.trim()) {
             const nums = serviceInput.split(',').map(s => parseInt(s.trim()) - 1);
             for (const n of nums) {
-              if (n >= 0 && n < serviceIds.length) {
-                selectedServices.push(serviceIds[n]);
+              if (n >= 0 && n < availableServices.length) {
+                selectedServices.push(availableServices[n].id);
               }
             }
           }
@@ -1043,14 +990,16 @@ export default function register(api) {
                 if (selectedServices.length > 0) {
                   console.log(`\nAdvertising ${selectedServices.length} services...`);
                   for (const serviceId of selectedServices) {
-                    const svc = PREDEFINED_SERVICES[serviceId];
-                    try {
-                      await execFileAsync('node', [
-                        cliPath, 'advertise', serviceId, svc.name, svc.priceSats.toString(), svc.description
-                      ], { env, timeout: 60000 });
-                      console.log(`  ✅ ${svc.name} (${svc.priceSats} sats)`);
-                    } catch (err: any) {
-                      console.log(`  ❌ ${svc.name}: ${err.message}`);
+                    const svc = serviceManager.registry.get(serviceId);
+                    if (svc) {
+                      try {
+                        await execFileAsync('node', [
+                          cliPath, 'advertise', serviceId, svc.name, svc.defaultPrice.toString(), svc.description
+                        ], { env, timeout: 60000 });
+                        console.log(`  ✅ ${svc.name} (${svc.defaultPrice} sats)`);
+                      } catch (err: any) {
+                        console.log(`  ❌ ${svc.name}: ${err.message}`);
+                      }
                     }
                   }
                 }
