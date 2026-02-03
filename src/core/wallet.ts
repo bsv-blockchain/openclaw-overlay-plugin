@@ -14,6 +14,7 @@ import {
   Monitor,
   StorageKnex,
   randomBytesHex,
+  ChaintracksServiceClient,
 } from '@bsv/wallet-toolbox';
 import type { SetupWallet } from '@bsv/wallet-toolbox';
 import knexLib from 'knex';
@@ -230,6 +231,7 @@ export class BSVAgentWallet {
 
     // 3. Network services (ARC broadcasting, chain tracking, etc.)
     const serviceOptions = Services.createDefaultOptions(chain);
+    serviceOptions.chaintracks = new ChaintracksServiceClient(chain, 'https://chaintracks-us-1.bsvb.tech');
     serviceOptions.taalApiKey = taalApiKey;
     const services = new Services(serviceOptions);
 
