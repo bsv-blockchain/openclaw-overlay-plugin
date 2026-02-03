@@ -32,7 +32,10 @@ async function runTests() {
   const childPrivKey = keyDeriver.derivePrivateKey(brc29ProtocolID, keyString, 'self');
   const pubKey = keyDeriver.derivePublicKey(brc29ProtocolID, keyString, 'self', true);
   const derivedAddress = pubKey.toAddress();
-  const derivedHash160 = new Uint8Array(pubKey.toHash());
+  const hashResult = pubKey.toHash();
+  const derivedHash160 = typeof hashResult === 'string' 
+    ? new Uint8Array(hashResult.match(/.{2}/g)!.map(h => parseInt(h, 16)))
+    : new Uint8Array(hashResult);
 
   // Test 1: Consistency
   console.log('✓ Test 1: Derived keys are consistent');

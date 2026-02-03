@@ -91,6 +91,7 @@ export async function buildRealOverlayTransaction(
 
   // --- Fund the transaction ---
   let sourceTx: any = null;
+  let sourceBeef: any = null; // Keep the Beef object for proper ancestry
   let sourceVout: number = 0;
   let inputSats: number = 0;
   let sourceChain: SourceChainEntry[] = [];
@@ -104,8 +105,10 @@ export async function buildRealOverlayTransaction(
       sourceVout = storedChange.vout;
       inputSats = storedChange.satoshis;
 
-      // Reconstruct source chain for full BEEF
+      // Reconstruct the transaction chain by linking sourceTransaction references
+      // mergeTransaction follows these links recursively to build proper BEEF
       if (storedChange.sourceChain && storedChange.sourceChain.length > 0) {
+        // Link transactions: sourceTx -> sourceChain[0] -> sourceChain[1] -> ...
         let childTx = sourceTx;
         for (const entry of storedChange.sourceChain) {
           const srcTx = sdk.Transaction.fromHex(entry.txHex);
@@ -118,6 +121,11 @@ export async function buildRealOverlayTransaction(
         }
         sourceChain = storedChange.sourceChain;
       }
+      
+      // Create Beef and merge sourceTx - this recursively follows sourceTransaction
+      // links to include the full ancestry chain with merkle proofs
+      sourceBeef = new sdk.Beef();
+      sourceBeef.mergeTransaction(sourceTx);
       usedStoredBeef = true;
     } catch {
       // Fallback to WoC
@@ -139,8 +147,8 @@ export async function buildRealOverlayTransaction(
     // Try WoC BEEF first
     const beefBytes = await fetchBeefFromWoC(suitableUtxo.tx_hash);
     if (beefBytes) {
-      const beef = sdk.Beef.fromBinary(Array.from(beefBytes));
-      const beefTx = beef.findTxid(suitableUtxo.tx_hash);
+      sourceBeef = sdk.Beef.fromBinary(Array.from(beefBytes));
+      const beefTx = sourceBeef.findTxid(suitableUtxo.tx_hash);
       if (beefTx) {
         sourceTx = beefTx.tx || beefTx._tx;
         if (!sourceTx) {
@@ -189,7 +197,18 @@ export async function buildRealOverlayTransaction(
   // Sign
   await tx.sign();
   const txid = tx.id('hex');
-  const beefForOverlay = tx.toBEEF();
+  
+  // Build proper BEEF with full ancestry
+  // The overlay's SPV verification needs the complete input chain
+  let beefForOverlay: number[];
+  if (sourceBeef) {
+    // Merge the new signed transaction into the source Beef
+    sourceBeef.mergeTransaction(tx);
+    beefForOverlay = sourceBeef.toBinary();
+  } else {
+    // Fallback to transaction's toBEEF (shouldn't happen if flow is correct)
+    beefForOverlay = tx.toBEEF();
+  }
 
   // --- Submit to overlay ---
   // Use binary BEEF with X-Topics header (matches clawdbot-overlay server API)
