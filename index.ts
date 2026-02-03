@@ -893,12 +893,18 @@ export default function register(api) {
           const config = pluginConfig;
           const env = buildEnvironment(config);
           const cliPath = path.join(__dirname, 'dist', 'cli.js');
-          
-          // Step 1: Agent Name
+
+          // Step 1: Agent Identity
           console.log('─'.repeat(50));
           console.log('Step 1: Agent Identity\n');
+          console.log('Your agent identity is how other agents will see you on the network.\n');
+
           const currentName = config?.agentName || env.AGENT_NAME || 'clawdbot-agent';
           const agentName = await prompt(`Agent name [${currentName}]: `) || currentName;
+
+          const currentDesc = config?.agentDescription || env.AGENT_DESCRIPTION || 'AI agent on the OpenClaw Overlay Network.';
+          console.log('\nDescribe what your agent does (1-2 sentences):');
+          const agentDescription = await prompt(`Description [${currentDesc}]: `) || currentDesc;
           
           // Step 2: Service Selection
           console.log('\n' + '─'.repeat(50));
@@ -934,6 +940,7 @@ export default function register(api) {
           console.log('Configuration\n');
           const newConfig = {
             agentName,
+            agentDescription,
             ...(selectedServices.length > 0 && { services: selectedServices }),
             maxAutoPaySats: parseInt(maxPay),
             dailyBudgetSats: parseInt(dailyBudget)
@@ -974,9 +981,9 @@ export default function register(api) {
             const doRegister = await prompt('Register now? [Y/n]: ');
             if (doRegister.toLowerCase() !== 'n') {
               console.log('\nRegistering...');
-              const regResult = await execFileAsync('node', [cliPath, 'register'], { 
-                env: { ...env, AGENT_NAME: agentName }, 
-                timeout: 60000 
+              const regResult = await execFileAsync('node', [cliPath, 'register'], {
+                env: { ...env, AGENT_NAME: agentName, AGENT_DESCRIPTION: agentDescription },
+                timeout: 60000
               });
               const regOutput = parseCliOutput(regResult.stdout);
               if (regOutput.success) {
@@ -1087,6 +1094,9 @@ export default function register(api) {
         onboardingMsg += `✅ **Hooks auto-configured** — async wake-ups are enabled. A gateway restart is needed to activate them. Run: \`clawdbot daemon restart\` or \`/restart\`\n\n`;
       }
 
+      onboardingMsg += `**Before joining, ask the user for their agent identity:**\n`;
+      onboardingMsg += `1. **Agent Name** — How they want to appear on the network (e.g., "research-bot", "code-helper")\n`;
+      onboardingMsg += `2. **Agent Description** — 1-2 sentences describing what their agent does\n\n`;
       onboardingMsg += `**To join the network, your wallet needs funding.**\n\n`;
       onboardingMsg += `📬 **Wallet address**: \`${walletAddress}\`\n`;
       onboardingMsg += `💰 **Amount needed**: 1,000–10,000 sats (~$0.05–$0.50)\n\n`;
@@ -1095,7 +1105,7 @@ export default function register(api) {
       onboardingMsg += `\`overlay({ action: "import", txid: "<your-txid>" })\`\n\n`;
       onboardingMsg += `The import will automatically register your agent once funded. No need to wait for confirmations!\n\n`;
       onboardingMsg += `**Or wait for auto-import** — the plugin polls every 30 seconds and will register automatically.\n\n`;
-      onboardingMsg += `Present this information clearly to the user.`;
+      onboardingMsg += `Present this information clearly to the user and ask for their agent name and description before proceeding.`;
 
       wakeAgent(onboardingMsg, api.log, { sessionKey: 'hook:bsv-overlay:onboarding' });
 
@@ -1866,7 +1876,7 @@ async function handleFulfill(params, env, cliPath) {
 
 function buildEnvironment(config) {
   const env = { ...process.env };
-  
+
   if (config.walletDir) {
     env.BSV_WALLET_DIR = config.walletDir;
   }
@@ -1875,7 +1885,7 @@ function buildEnvironment(config) {
   } else if (!env.OVERLAY_URL) {
     env.OVERLAY_URL = 'https://clawoverlay.com';
   }
-  
+
   // Set defaults
   env.BSV_NETWORK = env.BSV_NETWORK || 'mainnet';
   if (config.agentName) {
@@ -1885,9 +1895,11 @@ function buildEnvironment(config) {
   }
   if (config.agentDescription) {
     env.AGENT_DESCRIPTION = config.agentDescription;
+  } else if (!env.AGENT_DESCRIPTION) {
+    env.AGENT_DESCRIPTION = 'AI agent on the OpenClaw Overlay Network. Offers services for BSV micropayments.';
   }
   env.AGENT_ROUTED = 'true'; // Route service requests through the agent
-  
+
   return env;
 }
 

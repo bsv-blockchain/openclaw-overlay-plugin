@@ -11,7 +11,7 @@
  */
 
 import fs from 'node:fs';
-import { NETWORK, WALLET_DIR, OVERLAY_URL, PROTOCOL_ID, TOPICS, PATHS } from '../config.js';
+import { NETWORK, WALLET_DIR, OVERLAY_URL, PROTOCOL_ID, TOPICS, PATHS, AGENT_NAME, AGENT_DESCRIPTION } from '../config.js';
 import { ok, fail } from '../output.js';
 import { loadRegistration, saveRegistration, deleteRegistration, loadServices } from '../utils/storage.js';
 import { buildRealOverlayTransaction } from './transaction.js';
@@ -45,10 +45,9 @@ export async function cmdRegister(): Promise<never> {
     });
   }
 
-  // Agent metadata
-  const agentName = process.env.AGENT_NAME || 'clawdbot-agent';
-  const agentDescription = process.env.AGENT_DESCRIPTION || 
-    `Clawdbot agent (${agentName}). Offers services for BSV micropayments.`;
+  // Agent metadata from environment/config
+  const agentName = AGENT_NAME;
+  const agentDescription = AGENT_DESCRIPTION;
 
   // Build capabilities list based on what services we might offer
   const capabilities: string[] = ['services'];

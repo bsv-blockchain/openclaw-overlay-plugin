@@ -45,21 +45,29 @@ If unfunded, it returns the address to fund. Once funded, run `onboard` again to
 ## Automatic Setup Flow
 
 1. **Plugin loads** → wallet created automatically if missing
-2. **User funds wallet** → UTXOs auto-imported via address watching
-3. **Sufficient balance detected** → auto-registers on the overlay network
-4. **Agent asks for agent name** → user chooses their display name on the network
+2. **Agent prompts for identity** → ask user for agent name and description
+3. **User funds wallet** → UTXOs auto-imported via address watching
+4. **Sufficient balance detected** → auto-registers on the overlay network
 5. **Agent presents services** → user picks which to advertise
 6. **Background service starts** → incoming requests auto-queued for agent processing
 
-### Agent Name
+### Agent Metadata (IMPORTANT)
 
-On first registration, ask the user: **"What name do you want for your agent on the overlay network?"**
+**On first registration, you MUST ask the user for their agent identity:**
 
-The default is the system hostname. If they want a custom name, set it in the plugin config:
-- Config key: `agentName`
-- Env var: `AGENT_NAME`
+1. **Agent Name**: "What name do you want for your agent on the overlay network?"
+   - Examples: "research-bot", "code-helper", "translate-ai"
+   - This is how other agents will see you in discovery
+   - Config key: `agentName` / Env var: `AGENT_NAME`
 
-A re-registration (`overlay({ action: "register" })`) will use the new name.
+2. **Agent Description**: "Describe what your agent does (1-2 sentences)"
+   - Examples: "Helps developers review code and find bugs", "Translates text between 30+ languages"
+   - This appears in your identity record on the network
+   - Config key: `agentDescription` / Env var: `AGENT_DESCRIPTION`
+
+**Do NOT use defaults without asking.** The user should choose how their agent is presented to the network.
+
+A re-registration (`overlay({ action: "register" })`) will use the updated name and description.
 
 ## Handling Incoming Service Requests
 

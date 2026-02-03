@@ -6,44 +6,10 @@ import { OVERLAY_URL, LOOKUP_SERVICES } from '../config.js';
 import { ok } from '../output.js';
 import { lookupOverlay, parseOverlayOutput } from './transaction.js';
 
-// Dynamic import for @bsv/sdk
-let _sdk: any = null;
-
-async function getSdk(): Promise<any> {
-  if (_sdk) return _sdk;
-
-  try {
-    _sdk = await import('@bsv/sdk');
-    return _sdk;
-  } catch {
-    const { fileURLToPath } = await import('node:url');
-    const path = await import('node:path');
-    const os = await import('node:os');
-
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const candidates = [
-      path.resolve(__dirname, '..', '..', '..', 'node_modules', '@bsv', 'sdk', 'dist', 'esm', 'mod.js'),
-      path.resolve(__dirname, '..', '..', '..', '..', '..', 'a2a-bsv', 'packages', 'core', 'node_modules', '@bsv', 'sdk', 'dist', 'esm', 'mod.js'),
-      path.resolve(os.homedir(), 'a2a-bsv', 'packages', 'core', 'node_modules', '@bsv', 'sdk', 'dist', 'esm', 'mod.js'),
-    ];
-
-    for (const p of candidates) {
-      try {
-        _sdk = await import(p);
-        return _sdk;
-      } catch {
-        // Try next
-      }
-    }
-    throw new Error('Cannot find @bsv/sdk. Run setup.sh first.');
-  }
-}
-
 /**
  * Discover command: query the overlay for agents and services.
  */
 export async function cmdDiscover(args: string[]): Promise<never> {
-  const sdk = await getSdk();
 
   // Parse flags
   let serviceFilter: string | null = null;
@@ -69,15 +35,12 @@ export async function cmdDiscover(args: string[]): Promise<never> {
 
       if (agentResult.outputs) {
         for (const output of agentResult.outputs) {
-          const data = await parseOverlayOutput(output.beef, output.outputIndex);
-          if (data && data.type === 'identity') {
-            let txid: string | null = null;
-            try {
-              const tx = sdk.Transaction.fromBEEF(output.beef);
-              txid = tx.id('hex');
-            } catch { /* ignore */ }
-            results.agents.push({ ...data, txid });
-          }
+          try {
+            const { data, txid } = await parseOverlayOutput(output.beef, output.outputIndex);
+            if (data?.type === 'identity') {
+              results.agents.push({ ...data, txid });
+            }
+          } catch { /* ignore */ }
         }
       }
     } catch (err: any) {
@@ -93,15 +56,12 @@ export async function cmdDiscover(args: string[]): Promise<never> {
 
       if (serviceResult.outputs) {
         for (const output of serviceResult.outputs) {
-          const data = await parseOverlayOutput(output.beef, output.outputIndex);
-          if (data && data.type === 'service') {
-            let txid: string | null = null;
-            try {
-              const tx = sdk.Transaction.fromBEEF(output.beef);
-              txid = tx.id('hex');
-            } catch { /* ignore */ }
-            results.services.push({ ...data, txid });
-          }
+          try {
+            const { data, txid } = await parseOverlayOutput(output.beef, output.outputIndex);
+            if (data?.type === 'service') {
+              results.services.push({ ...data, txid });
+            }
+          } catch { /* ignore */ }
         }
       }
     } catch (err: any) {

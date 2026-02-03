@@ -8,50 +8,13 @@
 
 import { NETWORK, OVERLAY_URL, PROTOCOL_ID, WALLET_DIR } from '../config.js';
 import type { OverlayPayload } from '../types.js';
-import { Utils, PushDrop, TopicBroadcaster } from '@bsv/sdk';
+import { Utils, PushDrop, Transaction } from '@bsv/sdk';
 import { BSVAgentWallet } from '../../core/wallet.js';
-
-// Dynamic import for @bsv/sdk
-let _sdk: any = null;
-
-async function getSdk(): Promise<any> {
-  if (_sdk) return _sdk;
-
-  try {
-    _sdk = await import('@bsv/sdk');
-    return _sdk;
-  } catch {
-    const { fileURLToPath } = await import('node:url');
-    const path = await import('node:path');
-    const os = await import('node:os');
-
-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    const candidates = [
-      path.resolve(__dirname, '..', '..', '..', 'node_modules', '@bsv', 'sdk', 'dist', 'esm', 'mod.js'),
-      path.resolve(__dirname, '..', '..', '..', '..', '..', 'a2a-bsv', 'packages', 'core', 'node_modules', '@bsv', 'sdk', 'dist', 'esm', 'mod.js'),
-      path.resolve(os.homedir(), 'a2a-bsv', 'packages', 'core', 'node_modules', '@bsv', 'sdk', 'dist', 'esm', 'mod.js'),
-    ];
-
-    for (const p of candidates) {
-      try {
-        _sdk = await import(p);
-        return _sdk;
-      } catch {
-        // Try next
-      }
-    }
-    throw new Error('Cannot find @bsv/sdk. Run setup.sh first.');
-  }
-}
 
 /**
  * Build an PushDrop locking script with JSON payload using SDK's Script class.
  * 
- * Format: OP_FALSE OP_RETURN <"clawdbot-overlay-v1"> <JSON payload>
- * This matches the clawdbot-overlay server's expected format.
- * 
  * @param payload - The data to embed in the OP_RETURN
- * @param sdk - The @bsv/sdk module
  * @returns A proper Script object that the SDK can serialize
  */
 export async function buildPushDropScript(wallet: BSVAgentWallet, payload: OverlayPayload): Promise<string> {
@@ -146,88 +109,16 @@ export async function lookupOverlay(
 export async function parseOverlayOutput(
   beefData: string | Uint8Array | number[],
   outputIndex: number
-): Promise<OverlayPayload | null> {
-  const sdk = await getSdk();
-
+): Promise<{ data: OverlayPayload | null; txid: string | null }> {
   try {
-    // Handle different input formats
-    let beefArray: number[];
-    if (typeof beefData === 'string') {
-      beefArray = Array.from(new Uint8Array(sdk.Utils.fromBase64(beefData)));
-    } else if (Array.isArray(beefData)) {
-      beefArray = beefData;
-    } else {
-      beefArray = Array.from(beefData);
-    }
+    const tx = Transaction.fromBEEF(beefData as number[]);
+    const txid = tx.id('hex')
+    const output = tx.outputs[outputIndex];
+    if (!output) return { data: null, txid: null };
 
-    // Parse using Beef.fromBinary (handles BRC-95 BEEF format)
-    const beef = sdk.Beef.fromBinary(beefArray);
-
-    // Find the transaction with the OP_RETURN output
-    for (const beefTx of (beef.txs || [])) {
-      const tx = beefTx.tx || beefTx._tx;
-      if (!tx || !tx.outputs) continue;
-
-      const output = tx.outputs[outputIndex];
-      if (!output) continue;
-
-      // Convert script to Uint8Array (toBinary may return plain Array)
-      const scriptRaw = output.lockingScript.toBinary();
-      const script = scriptRaw instanceof Uint8Array ? scriptRaw : new Uint8Array(scriptRaw);
-
-      // Check for OP_RETURN patterns:
-      // - 0x6a ... (direct OP_RETURN)
-      // - 0x00 0x6a ... (OP_FALSE OP_RETURN)
-      let offset = 0;
-      if (script[0] === 0x6a) {
-        offset = 1;
-      } else if (script[0] === 0x00 && script[1] === 0x6a) {
-        offset = 2;
-      } else {
-        continue; // Not OP_RETURN
-      }
-
-      // Parse PUSHDATA opcodes to extract JSON
-      const readPush = (): Uint8Array | null => {
-        if (offset >= script.length) return null;
-        const op = script[offset++];
-        if (op <= 75) {
-          const data = script.slice(offset, offset + op);
-          offset += op;
-          return data;
-        } else if (op === 0x4c) {
-          const len = script[offset++];
-          const data = script.slice(offset, offset + len);
-          offset += len;
-          return data;
-        } else if (op === 0x4d) {
-          const len = script[offset] | (script[offset + 1] << 8);
-          offset += 2;
-          const data = script.slice(offset, offset + len);
-          offset += len;
-          return data;
-        }
-        return null;
-      };
-
-      // First push: protocol ID
-      readPush();
-
-      // Second push: JSON payload
-      const payloadBytes = readPush();
-      if (!payloadBytes) continue;
-
-      try {
-        const json = new TextDecoder().decode(payloadBytes);
-        const parsed = JSON.parse(json);
-        return parsed;
-      } catch {
-        continue;
-      }
-    }
-
-    return null;
+    const { fields } = PushDrop.decode(output.lockingScript);
+    return { data: JSON.parse(Utils.toUTF8(fields[0])), txid };
   } catch {
-    return null;
+    return { data: null, txid: null };
   }
 }

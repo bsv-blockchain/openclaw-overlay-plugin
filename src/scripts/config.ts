@@ -32,6 +32,13 @@ export const NETWORK: 'mainnet' | 'testnet' =
 /** Overlay server URL */
 export const OVERLAY_URL = process.env.OVERLAY_URL || 'https://clawoverlay.com';
 
+/** Agent display name on the overlay network */
+export const AGENT_NAME = process.env.AGENT_NAME || 'clawdbot-agent';
+
+/** Agent description for the overlay identity */
+export const AGENT_DESCRIPTION = process.env.AGENT_DESCRIPTION ||
+  `AI agent on the OpenClaw Overlay Network. Offers services for BSV micropayments.`;
+
 /** WhatsOnChain API key (optional, for rate limit bypass) */
 export const WOC_API_KEY = process.env.WOC_API_KEY || '';
 
