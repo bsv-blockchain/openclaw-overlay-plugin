@@ -11,7 +11,7 @@
  * Run with: npx tsx src/test/comprehensive-overlay.test.ts
  */
 
-import { Beef, Transaction, PrivateKey, P2PKH, Script, MerklePath } from '@bsv/sdk';
+import { Beef, Transaction, PrivateKey, P2PKH, Script } from '@bsv/sdk';
 import {
   PROTOCOL_ID,
   extractOpReturnPushes,
@@ -56,9 +56,10 @@ function test(name: string, fn: () => void | Promise<void>): void {
       results.push({ name, passed: true });
       console.log(`✅ ${name}`);
     }
-  } catch (e: any) {
-    results.push({ name, passed: false, error: e.message });
-    console.log(`❌ ${name}: ${e.message}`);
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    results.push({ name, passed: false, error: errorMessage });
+    console.log(`❌ ${name}: ${errorMessage}`);
   }
 }
 
@@ -87,11 +88,6 @@ function buildOpReturnScript(payload: object): Script {
   script.writeBin(jsonBytes);
 
   return script;
-}
-
-function createMockMerklePath(txid: string, blockHeight: number = 100000): MerklePath {
-  // Create a minimal valid merkle path
-  return new MerklePath(blockHeight, [[{ hash: txid, offset: 0 }]]);
 }
 
 async function createSignedTransaction(

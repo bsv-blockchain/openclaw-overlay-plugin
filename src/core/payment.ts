@@ -5,8 +5,8 @@
  * without ever reusing an address.
  */
 
-import { PrivateKey, PublicKey, Beef, Utils } from '@bsv/sdk';
-import { Setup, randomBytesBase64, ScriptTemplateBRC29 } from '@bsv/wallet-toolbox';
+import { Beef, Utils } from '@bsv/sdk';
+import { randomBytesBase64, ScriptTemplateBRC29 } from '@bsv/wallet-toolbox';
 import type { SetupWallet } from '@bsv/wallet-toolbox';
 import type { PaymentParams, PaymentResult } from './types.js';
 import type { CachedKeyDeriver } from '@bsv/sdk';

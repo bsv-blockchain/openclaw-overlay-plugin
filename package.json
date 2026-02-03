@@ -18,6 +18,7 @@
   "scripts": {
     "build": "tsc",
     "cli": "node dist/cli.js",
+    "test": "npx tsx src/**/*.test.ts",
     "lint": "eslint src/**/*.ts",
     "postinstall": "node -e \"try{require('better-sqlite3')}catch{console.log('Note: better-sqlite3 requires build tools. If install failed, ensure python3 and a C++ compiler are available.')}\""
   },

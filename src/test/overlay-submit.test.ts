@@ -8,7 +8,7 @@
  * Run with: npx tsx src/test/overlay-submit.test.ts
  */
 
-import { Beef, Transaction, PrivateKey, P2PKH, Script, MerklePath, OP } from '@bsv/sdk';
+import { Beef, Transaction, PrivateKey, P2PKH, Script, OP } from '@bsv/sdk';
 
 const PROTOCOL_ID = 'clawdbot-overlay-v1';
 
@@ -283,7 +283,8 @@ async function testBeefFormat(): Promise<void> {
 
   // Validate the newest transaction can be found in BEEF
   // Note: Transaction.fromBEEF returns the oldest tx; we check the beef.txs array for the newest
-  const newestTxid = (parsed.txs[0] as any).txid || parsed.txs[0]._tx?.id('hex');
+  const beefTx = parsed.txs[0] as { txid?: string; _tx?: Transaction };
+  const newestTxid = beefTx.txid || beefTx._tx?.id('hex');
   assert(newestTxid === tx.id('hex'), `Newest transaction in BEEF should match original, got ${newestTxid?.slice(0, 16)}`);
 }
 
@@ -322,7 +323,7 @@ async function testIdentityPayload(): Promise<void> {
   assert(parseIdentityOutput(script2) === null, 'Wrong protocol should be rejected');
 
   // Invalid: wrong type
-  const wrongType = { ...validPayload, type: 'service' as any };
+  const wrongType = { ...validPayload, type: 'service' as const };
   const script3 = buildOpReturnScript(wrongType);
   assert(parseIdentityOutput(script3) === null, 'Wrong type should be rejected');
 
@@ -337,7 +338,7 @@ async function testIdentityPayload(): Promise<void> {
   assert(parseIdentityOutput(script5) === null, 'Empty name should be rejected');
 
   // Invalid: capabilities not array
-  const badCaps = { ...validPayload, capabilities: 'not-array' as any };
+  const badCaps = { ...validPayload, capabilities: 'not-array' as unknown as string[] };
   const script6 = buildOpReturnScript(badCaps);
   assert(parseIdentityOutput(script6) === null, 'Non-array capabilities should be rejected');
 }
@@ -371,7 +372,7 @@ async function testServicePayload(): Promise<void> {
   assert(parsed!.pricing.amountSats === 100, 'Price should match');
 
   // Invalid: missing pricing
-  const noPricing = { ...validPayload, pricing: undefined as any };
+  const noPricing = { ...validPayload, pricing: undefined as unknown as { model: string; amountSats: number } };
   const script2 = buildOpReturnScript(noPricing);
   assert(parseServiceOutput(script2) === null, 'Missing pricing should be rejected');
 
@@ -519,7 +520,8 @@ async function testChainedBeef(): Promise<void> {
   assert(parsedBeef.txs.length >= 2, `BEEF should contain at least 2 txs for chain, got ${parsedBeef.txs.length}`);
 
   // Verify child tx is the newest in BEEF
-  const newestTxid = (parsedBeef.txs[0] as any).txid || parsedBeef.txs[0]._tx?.id('hex');
+  const beefTx = parsedBeef.txs[0] as { txid?: string; _tx?: Transaction };
+  const newestTxid = beefTx.txid || beefTx._tx?.id('hex');
   assert(newestTxid === childTx.id('hex'), 'Newest tx in BEEF should be the child transaction');
 
   // Simulate server validation
