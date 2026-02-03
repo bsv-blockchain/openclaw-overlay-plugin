@@ -116,7 +116,7 @@ export async function buildRealOverlayTransaction(
   return {
     txid: response.txid as string,
     funded: 'stored-beef',
-    explorer: `https://${wocNet}whatsonchain.com/tx/${txid}`,
+    explorer: `https://${wocNet}whatsonchain.com/tx/${response.txid as string}`,
   };
 }
 
