@@ -1,12 +1,14 @@
 /**
  * Server validation logic mirrored from clawdbot-overlay.
- * 
+ *
  * This module contains the exact same parsing and validation logic
  * used by the server's topic managers, allowing us to validate
  * client output before submission.
+ *
+ * Updated to use PushDrop tokens instead of plain OP_RETURN.
  */
 
-import { Script, OP, Beef, Transaction } from '@bsv/sdk';
+import { Script, OP, Beef, PushDrop, LockingScript } from '@bsv/sdk';
 
 export const PROTOCOL_ID = 'clawdbot-overlay-v1';
 
@@ -59,12 +61,25 @@ export interface STEAKResponse {
 }
 
 // ============================================================================
-// Script Parsing (mirrored from server topic managers)
+// Script Parsing using PushDrop.decode()
 // ============================================================================
 
 /**
- * Extract data pushes from an OP_RETURN script.
- * Handles both legacy 4+ chunk format and collapsed 2-chunk format (SDK v1.10+).
+ * Extract data fields from a PushDrop script using the SDK's decode method.
+ * Returns the fields array or null if not a valid PushDrop script.
+ */
+export function extractPushDropFields(script: Script | LockingScript): number[][] | null {
+  try {
+    const decoded = PushDrop.decode(script as LockingScript);
+    return decoded.fields;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Legacy function for backwards compatibility - extracts from OP_RETURN scripts.
+ * @deprecated Use extractPushDropFields instead
  */
 export function extractOpReturnPushes(script: Script): Uint8Array[] | null {
   const chunks = script.chunks;
@@ -90,30 +105,26 @@ export function extractOpReturnPushes(script: Script): Uint8Array[] | null {
     const blob = chunks[1].data;
     const pushes: Uint8Array[] = [];
     let pos = 0;
-    
+
     while (pos < blob.length) {
       const op = blob[pos++];
-      
+
       if (op > 0 && op <= 75) {
-        // Direct push: op is the byte count
         const end = Math.min(pos + op, blob.length);
         pushes.push(new Uint8Array(blob.slice(pos, end)));
         pos = end;
       } else if (op === 0x4c) {
-        // OP_PUSHDATA1
         const len = blob[pos++] ?? 0;
         const end = Math.min(pos + len, blob.length);
         pushes.push(new Uint8Array(blob.slice(pos, end)));
         pos = end;
       } else if (op === 0x4d) {
-        // OP_PUSHDATA2
         const len = (blob[pos] ?? 0) | ((blob[pos + 1] ?? 0) << 8);
         pos += 2;
         const end = Math.min(pos + len, blob.length);
         pushes.push(new Uint8Array(blob.slice(pos, end)));
         pos = end;
       } else if (op === 0x4e) {
-        // OP_PUSHDATA4
         const len = ((blob[pos] ?? 0) |
           ((blob[pos + 1] ?? 0) << 8) |
           ((blob[pos + 2] ?? 0) << 16) |
@@ -123,11 +134,10 @@ export function extractOpReturnPushes(script: Script): Uint8Array[] | null {
         pushes.push(new Uint8Array(blob.slice(pos, end)));
         pos = end;
       } else {
-        // Unknown op — stop parsing
         break;
       }
     }
-    
+
     return pushes.length >= 2 ? pushes : null;
   }
 
@@ -135,22 +145,20 @@ export function extractOpReturnPushes(script: Script): Uint8Array[] | null {
 }
 
 // ============================================================================
-// Payload Parsing
+// Payload Parsing - Updated for PushDrop
 // ============================================================================
 
 /**
- * Parse identity payload from script.
+ * Parse identity payload from a PushDrop script.
+ * The first field contains the JSON payload.
  */
-export function parseIdentityOutput(script: Script): ClawdbotIdentityData | null {
-  const pushes = extractOpReturnPushes(script);
-  if (!pushes || pushes.length < 2) return null;
-
-  const protocolStr = new TextDecoder().decode(pushes[0]);
-  if (protocolStr !== PROTOCOL_ID) return null;
+export function parseIdentityOutput(script: Script | LockingScript): ClawdbotIdentityData | null {
+  const fields = extractPushDropFields(script);
+  if (!fields || fields.length < 1) return null;
 
   try {
     const payload = JSON.parse(
-      new TextDecoder().decode(pushes[1])
+      new TextDecoder().decode(new Uint8Array(fields[0]))
     ) as ClawdbotIdentityData;
 
     // Server validation rules
@@ -168,18 +176,15 @@ export function parseIdentityOutput(script: Script): ClawdbotIdentityData | null
 }
 
 /**
- * Parse identity revocation payload from script.
+ * Parse identity revocation payload from a PushDrop script.
  */
-export function parseRevocationOutput(script: Script): ClawdbotIdentityRevocationData | null {
-  const pushes = extractOpReturnPushes(script);
-  if (!pushes || pushes.length < 2) return null;
-
-  const protocolStr = new TextDecoder().decode(pushes[0]);
-  if (protocolStr !== PROTOCOL_ID) return null;
+export function parseRevocationOutput(script: Script | LockingScript): ClawdbotIdentityRevocationData | null {
+  const fields = extractPushDropFields(script);
+  if (!fields || fields.length < 1) return null;
 
   try {
     const payload = JSON.parse(
-      new TextDecoder().decode(pushes[1])
+      new TextDecoder().decode(new Uint8Array(fields[0]))
     ) as ClawdbotIdentityRevocationData;
 
     if (payload.protocol !== PROTOCOL_ID) return null;
@@ -194,18 +199,15 @@ export function parseRevocationOutput(script: Script): ClawdbotIdentityRevocatio
 }
 
 /**
- * Parse service payload from script.
+ * Parse service payload from a PushDrop script.
  */
-export function parseServiceOutput(script: Script): ClawdbotServiceData | null {
-  const pushes = extractOpReturnPushes(script);
-  if (!pushes || pushes.length < 2) return null;
-
-  const protocolStr = new TextDecoder().decode(pushes[0]);
-  if (protocolStr !== PROTOCOL_ID) return null;
+export function parseServiceOutput(script: Script | LockingScript): ClawdbotServiceData | null {
+  const fields = extractPushDropFields(script);
+  if (!fields || fields.length < 1) return null;
 
   try {
     const payload = JSON.parse(
-      new TextDecoder().decode(pushes[1])
+      new TextDecoder().decode(new Uint8Array(fields[0]))
     ) as ClawdbotServiceData;
 
     if (payload.protocol !== PROTOCOL_ID) return null;
@@ -232,7 +234,7 @@ export function parseServiceOutput(script: Script): ClawdbotServiceData | null {
 export function identifyIdentityOutputs(beef: number[]): AdmittanceResult {
   const parsedBeef = Beef.fromBinary(beef);
   const subjectTx = parsedBeef.txs[0]?._tx;
-  
+
   if (!subjectTx) {
     return { outputsToAdmit: [], coinsToRetain: [] };
   }
@@ -265,7 +267,7 @@ export function identifyIdentityOutputs(beef: number[]): AdmittanceResult {
 export function identifyServiceOutputs(beef: number[]): AdmittanceResult {
   const parsedBeef = Beef.fromBinary(beef);
   const subjectTx = parsedBeef.txs[0]?._tx;
-  
+
   if (!subjectTx) {
     return { outputsToAdmit: [], coinsToRetain: [] };
   }
@@ -292,8 +294,8 @@ export function identifyServiceOutputs(beef: number[]): AdmittanceResult {
 /**
  * Validate BEEF format and structure.
  */
-export function validateBeef(beef: number[]): { 
-  valid: boolean; 
+export function validateBeef(beef: number[]): {
+  valid: boolean;
   error?: string;
   version?: number;
   txCount?: number;
@@ -304,26 +306,26 @@ export function validateBeef(beef: number[]): {
     if (beef.length < 4) {
       return { valid: false, error: 'BEEF too short' };
     }
-    
+
     const magic = beef.slice(0, 4);
     const magicHex = magic.map(b => b.toString(16).padStart(2, '0')).join('');
-    
+
     if (magicHex !== '0100beef' && magicHex !== '0200beef') {
       return { valid: false, error: `Invalid magic bytes: ${magicHex}` };
     }
-    
+
     const version = magicHex === '0100beef' ? 1 : 2;
-    
+
     // Parse BEEF
     const parsed = Beef.fromBinary(beef);
-    
+
     if (!parsed.txs || parsed.txs.length === 0) {
       return { valid: false, error: 'BEEF contains no transactions' };
     }
-    
+
     // Check for merkle proofs
     const hasProofs = parsed.bumps && parsed.bumps.length > 0;
-    
+
     return {
       valid: true,
       version,
@@ -346,19 +348,19 @@ export function validateBeefAncestry(beef: number[]): {
   try {
     const parsed = Beef.fromBinary(beef);
     const chain: string[] = [];
-    
+
     for (const btx of parsed.txs) {
-      const txid = (btx as any).txid || btx._tx?.id('hex');
+      const txid = (btx as { txid?: string }).txid || btx._tx?.id('hex');
       if (txid) chain.push(txid);
     }
-    
+
     // Use Beef's built-in validation
     const isValid = parsed.isValid(false);
-    
+
     if (!isValid) {
       return { valid: false, error: 'BEEF ancestry chain is invalid', chain };
     }
-    
+
     return { valid: true, chain };
   } catch (e) {
     return { valid: false, error: e instanceof Error ? e.message : 'Unknown error' };

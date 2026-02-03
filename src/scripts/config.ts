@@ -39,7 +39,7 @@ export const WOC_API_KEY = process.env.WOC_API_KEY || '';
 export const OVERLAY_STATE_DIR = path.join(os.homedir(), '.clawdbot', 'bsv-overlay');
 
 /** Protocol identifier for overlay transactions */
-export const PROTOCOL_ID = 'clawdbot-overlay-v1';
+export const PROTOCOL_ID = 'clawdbot overlay v1';
 
 /** Topic managers for overlay submissions */
 export const TOPICS = {
