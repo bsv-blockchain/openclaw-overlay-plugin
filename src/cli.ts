@@ -11,3 +11,6 @@ process.env.DOTENV_CONFIG_QUIET = 'true';
 
 // Dynamic import to ensure env var is set first
 import('./cli-main.js');
+
+// Before importing the library
+(globalThis as any).window = { fetch: globalThis.fetch };
