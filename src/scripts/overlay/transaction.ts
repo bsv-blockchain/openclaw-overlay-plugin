@@ -6,11 +6,11 @@
  * - OP_RETURN format: OP_FALSE OP_RETURN <"clawdbot-overlay-v1"> <JSON>
  */
 
-import { NETWORK, OVERLAY_URL, PROTOCOL_ID } from '../config.js';
-import { wocFetch, fetchBeefFromWoC } from '../utils/woc.js';
-import { loadStoredChange, saveStoredChange, deleteStoredChange } from '../utils/storage.js';
-import { loadWalletIdentity, deriveWalletKeys } from '../wallet/identity.js';
-import type { OverlayPayload, SourceChainEntry } from '../types.js';
+import { NETWORK, OVERLAY_URL, PROTOCOL_ID, WALLET_DIR } from '../config.js';
+import { wocFetch } from '../utils/woc.js';
+import type { OverlayPayload } from '../types.js';
+import { Script } from '@bsv/sdk';
+import { BSVAgentWallet } from '../../core/wallet.js';
 
 // Dynamic import for @bsv/sdk
 let _sdk: any = null;
@@ -55,11 +55,11 @@ async function getSdk(): Promise<any> {
  * @param sdk - The @bsv/sdk module
  * @returns A proper Script object that the SDK can serialize
  */
-export function buildOpReturnScript(payload: OverlayPayload, sdk: any): any {
+export function buildOpReturnScript(payload: OverlayPayload): any {
   const protocolBytes = Array.from(new TextEncoder().encode(PROTOCOL_ID));
   const jsonBytes = Array.from(new TextEncoder().encode(JSON.stringify(payload)));
 
-  const script = new sdk.Script();
+  const script = new Script();
   script.writeOpCode(0x00);   // OP_FALSE
   script.writeOpCode(0x6a);   // OP_RETURN
   script.writeBin(protocolBytes);
@@ -78,135 +78,23 @@ export async function buildRealOverlayTransaction(
   payload: OverlayPayload,
   topic: string
 ): Promise<{ txid: string; funded: string; explorer: string }> {
-  const sdk = await getSdk();
-  const identity = loadWalletIdentity();
-  const rootPrivKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
-  const { address, hash160, childPrivKey } = await deriveWalletKeys(rootPrivKey);
-
-  // OP_RETURN outputs should have 0 satoshis (they're unspendable)
-  const OP_RETURN_SATS = 0;
-  const MIN_CHANGE = 200;
-  const MAX_FEE = 100; // max fee we're willing to pay
-  const MIN_INPUT = MIN_CHANGE + MAX_FEE;
-
-  // --- Fund the transaction ---
-  let sourceTx: any = null;
-  let sourceBeef: any = null; // Keep the Beef object for proper ancestry
-  let sourceVout: number = 0;
-  let inputSats: number = 0;
-  let sourceChain: SourceChainEntry[] = [];
-  let usedStoredBeef = false;
-
-  // First, try stored BEEF change
-  const storedChange = loadStoredChange();
-  if (storedChange && storedChange.satoshis >= MIN_INPUT) {
-    try {
-      sourceTx = sdk.Transaction.fromHex(storedChange.txHex);
-      sourceVout = storedChange.vout;
-      inputSats = storedChange.satoshis;
-
-      // Reconstruct the transaction chain by linking sourceTransaction references
-      // mergeTransaction follows these links recursively to build proper BEEF
-      if (storedChange.sourceChain && storedChange.sourceChain.length > 0) {
-        // Link transactions: sourceTx -> sourceChain[0] -> sourceChain[1] -> ...
-        let childTx = sourceTx;
-        for (const entry of storedChange.sourceChain) {
-          const srcTx = sdk.Transaction.fromHex(entry.txHex);
-          if (entry.merklePathHex) {
-            const mpBytes = entry.merklePathHex.match(/.{2}/g)!.map((h: string) => parseInt(h, 16));
-            srcTx.merklePath = sdk.MerklePath.fromBinary(mpBytes);
-          }
-          childTx.inputs[0].sourceTransaction = srcTx;
-          childTx = srcTx;
-        }
-        sourceChain = storedChange.sourceChain;
-      }
-      
-      // Create Beef and merge sourceTx - this recursively follows sourceTransaction
-      // links to include the full ancestry chain with merkle proofs
-      sourceBeef = new sdk.Beef();
-      sourceBeef.mergeTransaction(sourceTx);
-      usedStoredBeef = true;
-    } catch {
-      // Fallback to WoC
-    }
-  }
-
-  // If no stored BEEF, fetch from WoC
-  if (!sourceTx) {
-    const utxoResp = await wocFetch(`/address/${address}/unspent`);
-    if (!utxoResp.ok) {
-      throw new Error(`Failed to fetch UTXOs: ${utxoResp.status}`);
-    }
-    const utxos = await utxoResp.json();
-    const suitableUtxo = utxos.find((u: any) => u.value >= MIN_INPUT);
-    if (!suitableUtxo) {
-      throw new Error(`No suitable UTXO found. Need ≥ ${MIN_INPUT} sats. Fund address: ${address}`);
-    }
-
-    // Try WoC BEEF first
-    const beefBytes = await fetchBeefFromWoC(suitableUtxo.tx_hash);
-    if (beefBytes) {
-      sourceBeef = sdk.Beef.fromBinary(Array.from(beefBytes));
-      // Use findTransactionForSigning to get a Transaction with full sourceTransaction chain linked
-      // This is critical for proper BEEF construction - mergeTransaction follows these links
-      sourceTx = sourceBeef.findTransactionForSigning(suitableUtxo.tx_hash);
-      if (sourceTx) {
-        sourceVout = suitableUtxo.tx_pos;
-        inputSats = suitableUtxo.value;
-      }
-    }
-
-    if (!sourceTx) {
-      throw new Error(`Cannot obtain BEEF for UTXO ${suitableUtxo.tx_hash}. Transaction may be unconfirmed.`);
-    }
-  }
-
-  // --- Build the transaction ---
-  const tx = new sdk.Transaction();
-  tx.addInput({
-    sourceTransaction: sourceTx,
-    sourceOutputIndex: sourceVout,
-    unlockingScriptTemplate: new sdk.P2PKH().unlock(childPrivKey),
-  });
-
-  // OP_RETURN output with 0 satoshis
-  const opReturnScript = buildOpReturnScript(payload, sdk);
-  tx.addOutput({
-    lockingScript: opReturnScript,
-    satoshis: OP_RETURN_SATS,
-  });
-
-  // Change output
-  // Estimate script size: ~2 (opcodes) + ~20 (protocol) + payload JSON length
-  const payloadSize = JSON.stringify(payload).length;
-  const estimatedScriptSize = 2 + 1 + PROTOCOL_ID.length + 2 + payloadSize;
-  const estimatedSize = 148 + 34 + estimatedScriptSize + 34 + 10;
-  const fee = Math.max(Math.ceil(estimatedSize / 1000), 1);
-  const changeAmount = inputSats - OP_RETURN_SATS - fee;
-
-  if (changeAmount >= MIN_CHANGE) {
-    tx.addOutput({
-      lockingScript: new sdk.P2PKH().lock(hash160),
-      satoshis: changeAmount,
-    });
-  }
-
-  // Sign
-  await tx.sign();
-  const txid = tx.id('hex');
   
-  // Build proper BEEF with full ancestry
-  // The overlay's SPV verification needs the complete input chain
-  let beefForOverlay: number[];
-  if (sourceBeef) {
-    // Merge the new signed transaction into the source Beef
-    sourceBeef.mergeTransaction(tx);
-    beefForOverlay = sourceBeef.toBinary();
-  } else {
-    // Fallback to transaction's toBEEF (shouldn't happen if flow is correct)
-    beefForOverlay = tx.toBEEF();
-  }
+  const wallet = await BSVAgentWallet.create({ network: NETWORK, storageDir: WALLET_DIR })
+  const opReturnScript = buildOpReturnScript(payload);
+
+  const response = await wallet._setup.wallet.createAction({
+    description: 'topic manager submission',
+    outputs: [
+      {
+        lockingScript: opReturnScript,
+        satoshis: 0,
+        outputDescription: 'overlay',
+      }
+    ],
+    options: {
+      acceptDelayedBroadcast: false,
+    }
+  })
 
   // --- Submit to overlay ---
   // Use binary BEEF with X-Topics header (matches clawdbot-overlay server API)
@@ -216,7 +104,7 @@ export async function buildRealOverlayTransaction(
       'Content-Type': 'application/octet-stream',
       'X-Topics': JSON.stringify([topic]),
     },
-    body: new Uint8Array(beefForOverlay),
+    body: new Uint8Array(response.tx as number[]),
   });
 
   if (!submitResp.ok) {
@@ -224,61 +112,10 @@ export async function buildRealOverlayTransaction(
     throw new Error(`Overlay submission failed: ${submitResp.status} — ${errText}`);
   }
 
-  // --- Validate server response (STEAK format) ---
-  // The server returns which outputs were admitted per topic
-  // If no outputs were admitted, the transaction was rejected
-  const steakResponse = await submitResp.json();
-  const topicResult = steakResponse[topic];
-  
-  if (!topicResult || !topicResult.outputsToAdmit || topicResult.outputsToAdmit.length === 0) {
-    // Server accepted BEEF but rejected the payload
-    throw new Error(
-      `Overlay rejected transaction: no outputs admitted for topic ${topic}. ` +
-      `Response: ${JSON.stringify(steakResponse)}. ` +
-      `Ensure payload matches server's topic manager validation rules.`
-    );
-  }
-
-  // --- Save change for next tx ---
-  if (changeAmount >= MIN_CHANGE) {
-    const newSourceChain: SourceChainEntry[] = [{ txHex: sourceTx.toHex(), txid: sourceTx.id('hex') }];
-    if (!usedStoredBeef) {
-      // First tx in chain — try to add merkle proof from WoC
-      try {
-        const proofResp = await wocFetch(`/tx/${sourceTx.id('hex')}/proof/tsc`, {}, 1, 5000);
-        if (proofResp.ok) {
-          const proofData = await proofResp.json();
-          if (Array.isArray(proofData) && proofData.length > 0) {
-            const proof = proofData[0];
-            const { buildMerklePathFromTSC } = await import('../utils/merkle.js');
-            const mp = await buildMerklePathFromTSC(sourceTx.id('hex'), proof.index, proof.nodes, proof.blockHeight || 0);
-            newSourceChain[0].merklePathHex = Array.from(mp.toBinary()).map((b: number) => b.toString(16).padStart(2, '0')).join('');
-            newSourceChain[0].blockHeight = proof.blockHeight;
-          }
-        }
-      } catch {
-        // Non-fatal
-      }
-    } else {
-      newSourceChain.push(...sourceChain);
-    }
-
-    saveStoredChange({
-      txHex: tx.toHex(),
-      txid,
-      vout: 1, // change is output index 1
-      satoshis: changeAmount,
-      sourceChain: newSourceChain.slice(0, 10), // limit chain depth
-      savedAt: new Date().toISOString(),
-    });
-  } else {
-    deleteStoredChange();
-  }
-
   const wocNet = NETWORK === 'mainnet' ? '' : 'test.';
   return {
-    txid,
-    funded: usedStoredBeef ? 'stored-beef' : 'woc',
+    txid: response.txid as string,
+    funded: 'stored-beef',
     explorer: `https://${wocNet}whatsonchain.com/tx/${txid}`,
   };
 }
