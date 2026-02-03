@@ -148,12 +148,10 @@ export async function buildRealOverlayTransaction(
     const beefBytes = await fetchBeefFromWoC(suitableUtxo.tx_hash);
     if (beefBytes) {
       sourceBeef = sdk.Beef.fromBinary(Array.from(beefBytes));
-      const beefTx = sourceBeef.findTxid(suitableUtxo.tx_hash);
-      if (beefTx) {
-        sourceTx = beefTx.tx || beefTx._tx;
-        if (!sourceTx) {
-          throw new Error('BEEF tx object not found');
-        }
+      // Use findTransactionForSigning to get a Transaction with full sourceTransaction chain linked
+      // This is critical for proper BEEF construction - mergeTransaction follows these links
+      sourceTx = sourceBeef.findTransactionForSigning(suitableUtxo.tx_hash);
+      if (sourceTx) {
         sourceVout = suitableUtxo.tx_pos;
         inputSats = suitableUtxo.value;
       }
