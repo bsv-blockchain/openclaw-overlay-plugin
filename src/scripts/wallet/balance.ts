@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import { NETWORK, WALLET_DIR, PATHS } from '../config.js';
 import { ok, fail } from '../output.js';
-import { loadWalletIdentity, deriveWalletAddress } from './identity.js';
+import { loadWalletIdentity, deriveWalletKeys } from './identity.js';
 import { wocFetch, fetchBeefFromWoC, getExplorerBaseUrl } from '../utils/woc.js';
 import { buildMerklePathFromTSC } from '../utils/merkle.js';
 import { loadStoredChange, deleteStoredChange } from '../utils/storage.js';
@@ -50,6 +50,13 @@ async function getSdk(): Promise<any> {
 }
 
 /**
+ * Sleep helper for polling
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
  * Balance command: show wallet balance.
  */
 export async function cmdBalance(): Promise<never> {
@@ -64,8 +71,8 @@ export async function cmdBalance(): Promise<never> {
   let onChain: { address: string; confirmed: number; unconfirmed: number } | null = null;
   try {
     const identity = loadWalletIdentity();
-    const privKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
-    const { address } = await deriveWalletAddress(privKey);
+    const rootPrivKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
+    const { address } = await deriveWalletKeys(rootPrivKey);
 
     const resp = await wocFetch(`/address/${address}/balance`);
     if (resp.ok) {
@@ -85,6 +92,13 @@ export async function cmdBalance(): Promise<never> {
 
 /**
  * Import command: import external UTXO with merkle proof.
+ * 
+ * This function handles both confirmed and unconfirmed transactions.
+ * For unconfirmed transactions, it uses BEEF from WoC which includes
+ * the source chain back to confirmed ancestors (SPV-compliant).
+ * 
+ * If the transaction isn't yet on WoC (just broadcast), it will poll
+ * with exponential backoff for up to 60 seconds.
  */
 export async function cmdImport(txidArg: string | undefined, voutStr?: string): Promise<never> {
   if (!txidArg) {
@@ -101,56 +115,89 @@ export async function cmdImport(txidArg: string | undefined, voutStr?: string): 
   const sdk = await getSdk();
   const BSVAgentWallet = await getBSVAgentWallet();
 
-  // Check confirmation status
-  const txInfoResp = await wocFetch(`/tx/${txid}`);
-  if (!txInfoResp.ok) {
-    return fail(`Failed to fetch tx info: ${txInfoResp.status}`);
+  // Poll for transaction on WoC with exponential backoff
+  // This handles the case where user just broadcast and WoC hasn't indexed yet
+  let txInfo: any = null;
+  const maxWaitMs = 60000; // 60 seconds max
+  const startTime = Date.now();
+  let attempt = 0;
+  
+  while (Date.now() - startTime < maxWaitMs) {
+    const txInfoResp = await wocFetch(`/tx/${txid}`, {}, 1, 10000); // Single retry, 10s timeout
+    
+    if (txInfoResp.ok) {
+      txInfo = await txInfoResp.json();
+      break;
+    } else if (txInfoResp.status === 404) {
+      // Transaction not found yet - wait and retry
+      attempt++;
+      const delayMs = Math.min(1000 * Math.pow(1.5, attempt), 10000); // 1s, 1.5s, 2.25s, ... max 10s
+      console.error(`[import] Transaction not on WoC yet, waiting ${Math.round(delayMs/1000)}s... (attempt ${attempt})`);
+      await sleep(delayMs);
+      continue;
+    } else {
+      return fail(`Failed to fetch tx info: ${txInfoResp.status}`);
+    }
   }
-  const txInfo = await txInfoResp.json();
+
+  if (!txInfo) {
+    return fail(`Transaction ${txid} not found on WhatsOnChain after ${Math.round((Date.now() - startTime) / 1000)}s. The transaction may not have been broadcast yet, or the txid may be incorrect.`);
+  }
 
   const isConfirmed = txInfo.confirmations && txInfo.confirmations >= 1;
   const blockHeight = txInfo.blockheight;
 
-  let atomicBeefBytes: Uint8Array;
+  // Validate output exists
+  if (!txInfo.vout || !txInfo.vout[vout]) {
+    return fail(`Output index ${vout} not found in transaction (has ${txInfo.vout?.length || 0} outputs)`);
+  }
 
-  if (isConfirmed) {
-    // Confirmed path: use merkle proof
-    const rawTxResp = await wocFetch(`/tx/${txid}/hex`);
-    if (!rawTxResp.ok) {
-      return fail(`Failed to fetch raw tx: ${rawTxResp.status}`);
-    }
-    const rawTxHex = await rawTxResp.text();
-    const sourceTx = sdk.Transaction.fromHex(rawTxHex);
-    const output = sourceTx.outputs[vout];
-    if (!output) {
-      return fail(`Output index ${vout} not found (tx has ${sourceTx.outputs.length} outputs)`);
-    }
+  let atomicBeefBytes: Uint8Array | undefined;
 
-    // Try WoC BEEF first (even for confirmed — it's more reliable)
-    let usedWocBeef = false;
-    const wocBeefBytes = await fetchBeefFromWoC(txid);
-    if (wocBeefBytes) {
-      try {
-        const wocBeef = sdk.Beef.fromBinary(Array.from(wocBeefBytes));
-        const foundTx = wocBeef.findTxid(txid);
-        if (foundTx) {
-          atomicBeefBytes = wocBeef.toBinaryAtomic(txid);
-          usedWocBeef = true;
+  // Try WoC BEEF first - works for both confirmed and unconfirmed transactions
+  // WoC provides BEEF with full source chain back to confirmed ancestors
+  const wocBeefBytes = await fetchBeefFromWoC(txid);
+  
+  if (wocBeefBytes) {
+    try {
+      const wocBeef = sdk.Beef.fromBinary(Array.from(wocBeefBytes));
+      const foundTx = wocBeef.findTxid(txid);
+      
+      if (foundTx) {
+        // Verify the output exists in the parsed tx
+        const txObj = foundTx.tx || foundTx._tx;
+        if (txObj) {
+          const output = txObj.outputs[vout];
+          if (!output) {
+            return fail(`Output index ${vout} not found in BEEF transaction (has ${txObj.outputs.length} outputs)`);
+          }
         }
-      } catch (beefErr: any) {
-        console.error(`[cmdImport] WoC BEEF parse failed for confirmed tx: ${beefErr.message}`);
+        atomicBeefBytes = wocBeef.toBinaryAtomic(txid);
       }
+    } catch (beefErr: any) {
+      console.error(`[import] WoC BEEF parse failed: ${beefErr.message}`);
+      // Fall through to manual construction
     }
+  }
 
-    // Fallback: manual TSC proof
-    if (!usedWocBeef) {
+  // Fallback for confirmed txs: construct BEEF manually using TSC merkle proof
+  if (!atomicBeefBytes && isConfirmed) {
+    try {
+      const rawTxResp = await wocFetch(`/tx/${txid}/hex`);
+      if (!rawTxResp.ok) {
+        return fail(`Failed to fetch raw transaction: ${rawTxResp.status}`);
+      }
+      const rawTxHex = await rawTxResp.text();
+      const sourceTx = sdk.Transaction.fromHex(rawTxHex.trim());
+
       const proofResp = await wocFetch(`/tx/${txid}/proof/tsc`);
       if (!proofResp.ok) {
         return fail(`Failed to fetch merkle proof: ${proofResp.status}`);
       }
       const proofData = await proofResp.json();
+      
       if (!Array.isArray(proofData) || proofData.length === 0) {
-        return fail('No merkle proof available');
+        return fail('Merkle proof not available from WoC');
       }
 
       const proof = proofData[0];
@@ -160,36 +207,28 @@ export async function cmdImport(txidArg: string | undefined, voutStr?: string): 
       const beef = new sdk.Beef();
       beef.mergeTransaction(sourceTx);
       atomicBeefBytes = beef.toBinaryAtomic(txid);
-    }
-  } else {
-    // Unconfirmed path: try WoC BEEF (includes source chain back to confirmed ancestor)
-    const wocBeefBytes = await fetchBeefFromWoC(txid);
-    if (wocBeefBytes) {
-      try {
-        const wocBeef = sdk.Beef.fromBinary(Array.from(wocBeefBytes));
-        const foundTx = wocBeef.findTxid(txid);
-        if (!foundTx) {
-          return fail(`Transaction ${txid} is unconfirmed and WoC BEEF does not contain it. Wait for 1+ confirmation.`);
-        }
-        // Verify the output exists
-        const txObj = foundTx.tx || foundTx._tx;
-        if (txObj) {
-          const output = txObj.outputs[vout];
-          if (!output) {
-            return fail(`Output index ${vout} not found (tx has ${txObj.outputs.length} outputs)`);
-          }
-        }
-        atomicBeefBytes = wocBeef.toBinaryAtomic(txid);
-      } catch (beefErr: any) {
-        return fail(`Transaction ${txid} is unconfirmed (${txInfo.confirmations || 0} confirmations) and WoC BEEF failed: ${beefErr.message}. Wait for 1+ confirmation.`);
-      }
-    } else {
-      return fail(`Transaction ${txid} is unconfirmed (${txInfo.confirmations || 0} confirmations) and no BEEF available from WoC. Wait for 1+ confirmation.`);
+    } catch (manualErr: any) {
+      return fail(`Failed to construct BEEF manually: ${manualErr.message}`);
     }
   }
 
-  // Fetch output satoshis for reporting
-  let outputSatoshis = txInfo.vout?.[vout]?.value != null
+  // If still no BEEF, we can't import
+  if (!atomicBeefBytes) {
+    if (isConfirmed) {
+      return fail(`Transaction ${txid} is confirmed but BEEF construction failed. This is unexpected — please report this issue.`);
+    } else {
+      // Unconfirmed and no BEEF available
+      // This can happen if the funding tx itself spends unconfirmed inputs
+      return fail(
+        `Transaction ${txid} is unconfirmed (${txInfo.confirmations || 0} confirmations) and BEEF is not available.\n\n` +
+        `This usually means the funding transaction spends from other unconfirmed transactions, creating a chain.\n` +
+        `Wait for 1 block confirmation (~10 minutes) and try again, or use a fresh UTXO as the funding source.`
+      );
+    }
+  }
+
+  // Get output satoshis for reporting
+  const outputSatoshis = txInfo.vout[vout].value != null
     ? Math.round(txInfo.vout[vout].value * 1e8)
     : undefined;
 
@@ -199,7 +238,7 @@ export async function cmdImport(txidArg: string | undefined, voutStr?: string): 
 
   try {
     await wallet._setup.wallet.storage.internalizeAction({
-      tx: Array.from(atomicBeefBytes!),
+      tx: Array.from(atomicBeefBytes),
       outputs: [{
         outputIndex: vout,
         protocol: 'wallet payment',
@@ -229,6 +268,15 @@ export async function cmdImport(txidArg: string | undefined, voutStr?: string): 
     });
   } catch (err: any) {
     await wallet.destroy();
+    
+    // Provide helpful error messages for common issues
+    if (err.message?.includes('already') || err.message?.includes('duplicate')) {
+      return fail(`UTXO ${txid}:${vout} appears to already be imported.`);
+    }
+    if (err.message?.includes('script') || err.message?.includes('locking')) {
+      return fail(`UTXO ${txid}:${vout} does not belong to this wallet's address. Make sure you sent to the correct address.`);
+    }
+    
     return fail(`Failed to import UTXO: ${err.message}`);
   }
 }
@@ -247,8 +295,8 @@ export async function cmdRefund(targetAddress: string | undefined): Promise<neve
 
   const sdk = await getSdk();
   const identity = loadWalletIdentity();
-  const privKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
-  const { address: sourceAddress, hash160 } = await deriveWalletAddress(privKey);
+  const rootPrivKey = sdk.PrivateKey.fromHex(identity.rootKeyHex);
+  const { address: sourceAddress, hash160, childPrivKey } = await deriveWalletKeys(rootPrivKey);
 
   // Refund sweeps all funds — needs WoC to discover all UTXOs (manual command)
   const utxoResp = await wocFetch(`/address/${sourceAddress}/unspent`);
@@ -295,7 +343,7 @@ export async function cmdRefund(targetAddress: string | undefined): Promise<neve
     tx.addInput({
       sourceTransaction: storedBeefTx.tx,
       sourceOutputIndex: storedBeefTx.stored.vout,
-      unlockingScriptTemplate: new sdk.P2PKH().unlock(privKey),
+      unlockingScriptTemplate: new sdk.P2PKH().unlock(childPrivKey),
     });
     totalInput += storedBeefTx.stored.satoshis;
     storedBeefIncluded = true;
@@ -313,7 +361,7 @@ export async function cmdRefund(targetAddress: string | undefined): Promise<neve
     tx.addInput({
       sourceTransaction: srcTx,
       sourceOutputIndex: utxo.tx_pos,
-      unlockingScriptTemplate: new sdk.P2PKH().unlock(privKey),
+      unlockingScriptTemplate: new sdk.P2PKH().unlock(childPrivKey),
     });
     totalInput += utxo.value;
   }
