@@ -7,9 +7,8 @@
  */
 
 import { NETWORK, OVERLAY_URL, PROTOCOL_ID, WALLET_DIR } from '../config.js';
-import { wocFetch } from '../utils/woc.js';
 import type { OverlayPayload } from '../types.js';
-import { Script } from '@bsv/sdk';
+import { Utils, PushDrop, TopicBroadcaster } from '@bsv/sdk';
 import { BSVAgentWallet } from '../../core/wallet.js';
 
 // Dynamic import for @bsv/sdk
@@ -46,7 +45,7 @@ async function getSdk(): Promise<any> {
 }
 
 /**
- * Build an OP_RETURN locking script with JSON payload using SDK's Script class.
+ * Build an PushDrop locking script with JSON payload using SDK's Script class.
  * 
  * Format: OP_FALSE OP_RETURN <"clawdbot-overlay-v1"> <JSON payload>
  * This matches the clawdbot-overlay server's expected format.
@@ -55,17 +54,12 @@ async function getSdk(): Promise<any> {
  * @param sdk - The @bsv/sdk module
  * @returns A proper Script object that the SDK can serialize
  */
-export function buildOpReturnScript(payload: OverlayPayload): any {
-  const protocolBytes = Array.from(new TextEncoder().encode(PROTOCOL_ID));
-  const jsonBytes = Array.from(new TextEncoder().encode(JSON.stringify(payload)));
-
-  const script = new Script();
-  script.writeOpCode(0x00);   // OP_FALSE
-  script.writeOpCode(0x6a);   // OP_RETURN
-  script.writeBin(protocolBytes);
-  script.writeBin(jsonBytes);
-
-  return script;
+export async function buildPushDropScript(wallet: BSVAgentWallet, payload: OverlayPayload): string {
+  const jsonBytes = Utils.toArray(JSON.stringify(payload), 'utf8')
+  const fields: number[][] = [jsonBytes]
+  const token = new PushDrop(wallet._setup.wallet);
+  const script = await token.lock(fields, [0, PROTOCOL_ID], '1', 'self', true, true)
+  return script.toHex();
 }
 
 /**
@@ -80,18 +74,16 @@ export async function buildRealOverlayTransaction(
 ): Promise<{ txid: string; funded: string; explorer: string }> {
   
   const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR })
-  const opReturnScript = buildOpReturnScript(payload);
-  
-  // Convert Script to hex string (createAction expects hex, not Script object)
-  const lockingScriptHex = opReturnScript.toHex();
+  const lockingScript = buildPushDropScript(wallet, payload)
 
   const response = await wallet._setup.wallet.createAction({
     description: 'topic manager submission',
     outputs: [
       {
-        lockingScript: lockingScriptHex,
-        satoshis: 0,
+        lockingScript,
+        satoshis: 1,
         outputDescription: 'overlay',
+        basket: topic, // basket is the topic manager
       }
     ],
     options: {
