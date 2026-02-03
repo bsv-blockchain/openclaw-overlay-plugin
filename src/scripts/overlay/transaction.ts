@@ -224,6 +224,21 @@ export async function buildRealOverlayTransaction(
     throw new Error(`Overlay submission failed: ${submitResp.status} — ${errText}`);
   }
 
+  // --- Validate server response (STEAK format) ---
+  // The server returns which outputs were admitted per topic
+  // If no outputs were admitted, the transaction was rejected
+  const steakResponse = await submitResp.json();
+  const topicResult = steakResponse[topic];
+  
+  if (!topicResult || !topicResult.outputsToAdmit || topicResult.outputsToAdmit.length === 0) {
+    // Server accepted BEEF but rejected the payload
+    throw new Error(
+      `Overlay rejected transaction: no outputs admitted for topic ${topic}. ` +
+      `Response: ${JSON.stringify(steakResponse)}. ` +
+      `Ensure payload matches server's topic manager validation rules.`
+    );
+  }
+
   // --- Save change for next tx ---
   if (changeAmount >= MIN_CHANGE) {
     const newSourceChain: SourceChainEntry[] = [{ txHex: sourceTx.toHex(), txid: sourceTx.id('hex') }];
