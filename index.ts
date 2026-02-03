@@ -19,6 +19,10 @@ const pendingConfirmations: Map<string, { action: string; details: any; expiresA
 let autoImportInterval: any = null;
 let knownTxids: Set<string> = new Set();
 
+// Track woken service requests to prevent duplicate processing
+let wokenRequests: Set<string> = new Set();
+let requestCleanupInterval: any = null;
+
 // Budget tracking
 const BUDGET_FILE = 'daily-spending.json';
 
@@ -160,9 +164,17 @@ async function startAutoImport(env, cliPath, logger) {
               knownTxids.add(key);
               logger?.info?.(`[bsv-overlay] Auto-imported ${utxo.value} sats from ${utxo.tx_hash}`);
               
+              // Clear onboarding flag since wallet is now funded
+              try {
+                const onboardingSentFile = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'onboarding-sent.flag');
+                if (fs.existsSync(onboardingSentFile)) {
+                  fs.unlinkSync(onboardingSentFile);
+                }
+              } catch {}
+
               // Notify agent of successful import
               wakeAgent(`💰 **Wallet Funded!**\n\nAuto-imported ${utxo.value} sats from transaction ${utxo.tx_hash.slice(0, 16)}...\n\nNotify the user their wallet has been funded.`, logger, { sessionKey: 'hook:bsv-overlay:import' });
-              
+
               // Check if registered, auto-register if not
               try {
                 const regPath = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'registration.json');
@@ -440,6 +452,14 @@ function categorizeEvent(event) {
 function startBackgroundService(env, cliPath, logger) {
   if (backgroundProcess) return;
   serviceRunning = true;
+
+  // Clean up old request IDs every 5 minutes to prevent memory bloat
+  requestCleanupInterval = setInterval(() => {
+    if (serviceRunning) {
+      wokenRequests.clear();
+      logger?.debug?.('[bsv-overlay] Cleared stale request IDs');
+    }
+  }, 5 * 60 * 1000);
   
   function spawnConnect() {
     if (!serviceRunning) return;
@@ -464,6 +484,15 @@ function startBackgroundService(env, cliPath, logger) {
           // Detect queued-for-agent events — invoke agent via /hooks/agent
           // This is the PROVIDER side: someone requested our service
           if (event.action === 'queued-for-agent' && event.serviceId) {
+            const requestId = event.id || `${event.from}-${Date.now()}`;
+
+            // Check if already woken to prevent duplicate processing
+            if (wokenRequests.has(requestId)) {
+              logger?.debug?.(`[bsv-overlay] Request ${requestId} already woken, skipping duplicate`);
+              return;
+            }
+
+            wokenRequests.add(requestId);
             logger?.info?.(`[bsv-overlay] ⚡ Incoming ${event.serviceId} request from ${event.from?.slice(0, 12)}...`);
             const wakeText = `⚡ Incoming overlay service request!\n\nService: ${event.serviceId}\nFrom: ${event.from}\nPaid: ${event.satoshisReceived || '?'} sats\n\nFulfill it now:\n1. overlay({ action: "pending-requests" })\n2. Process the ${event.serviceId} request using your capabilities\n3. overlay({ action: "fulfill", requestId: "${event.id}", recipientKey: "${event.from}", serviceId: "${event.serviceId}", result: { ... } })`;
             wakeAgent(wakeText, logger, { sessionKey: `hook:bsv-overlay:${event.id || Date.now()}` });
@@ -528,6 +557,12 @@ function stopBackgroundService() {
     backgroundProcess.kill('SIGTERM');
     backgroundProcess = null;
   }
+  if (requestCleanupInterval) {
+    clearInterval(requestCleanupInterval);
+    requestCleanupInterval = null;
+  }
+  // Clear any remaining request IDs
+  wokenRequests.clear();
   stopAutoImport();
 }
 
@@ -1067,15 +1102,23 @@ export default function register(api) {
 
       // Step 4: If funded and not registered → auto-register
       if (!isRegistered && balance >= 1000) {
+        // Clear onboarding flag since wallet is now funded
+        try {
+          const onboardingSentFile = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'onboarding-sent.flag');
+          if (fs.existsSync(onboardingSentFile)) {
+            fs.unlinkSync(onboardingSentFile);
+          }
+        } catch {}
+
         api.log?.info?.('[bsv-overlay] Wallet funded but not registered — auto-registering...');
         const regResult = await execFileAsync('node', [cliPath, 'register'], { env, timeout: 60000 });
         const regOutput = parseCliOutput(regResult.stdout);
         if (regOutput.success) {
           api.log?.info?.('[bsv-overlay] Auto-registered on overlay network!');
-          
+
           // Auto-advertise services from config
           await autoAdvertiseServices(env, cliPath, api.log);
-          
+
           const wakeText = `🎉 **BSV Overlay: Registered on the network!**\n\nYour agent is now live on the OpenClaw Overlay Network.\n\nCurrent name: "${env.AGENT_NAME}"\n\nUse /overlay for instant status or ask me about your services.`;
           wakeAgent(wakeText, api.log);
           return; // Registered — done with onboarding
@@ -1085,8 +1128,28 @@ export default function register(api) {
       // Step 5: If already registered, nothing to onboard
       if (isRegistered) return;
 
-      // Step 6: Not registered + not funded → send onboarding message
+      // Step 6: Not registered + not funded → send onboarding message (only once per wallet)
       // This runs on first startup after plugin install (wallet just created or exists but empty)
+      const onboardingSentFile = path.join(process.env.HOME || '', '.clawdbot', 'bsv-overlay', 'onboarding-sent.flag');
+
+      // Check if we already sent onboarding message for this wallet
+      let alreadySent = false;
+      try {
+        if (fs.existsSync(onboardingSentFile)) {
+          const flagData = fs.readFileSync(onboardingSentFile, 'utf-8');
+          if (flagData.trim() === walletAddress) {
+            alreadySent = true;
+          }
+        }
+      } catch {
+        // Ignore errors reading flag file
+      }
+
+      if (alreadySent) {
+        api.log?.debug?.('[bsv-overlay] Onboarding message already sent for this wallet address');
+        return;
+      }
+
       const needsRestart = hooksAutoConfigured;
       let onboardingMsg = `🔌 **BSV Overlay Plugin — Setup**\n\nThe OpenClaw Overlay Network plugin is installed and your BSV wallet has been initialized.\n\n`;
 
@@ -1108,6 +1171,14 @@ export default function register(api) {
       onboardingMsg += `Present this information clearly to the user and ask for their agent name and description before proceeding.`;
 
       wakeAgent(onboardingMsg, api.log, { sessionKey: 'hook:bsv-overlay:onboarding' });
+
+      // Mark onboarding as sent for this wallet address
+      try {
+        fs.mkdirSync(path.dirname(onboardingSentFile), { recursive: true });
+        fs.writeFileSync(onboardingSentFile, walletAddress);
+      } catch (err: any) {
+        api.log?.warn?.(`[bsv-overlay] Failed to save onboarding flag: ${err.message}`);
+      }
 
     } catch (err: any) {
       api.log?.debug?.('[bsv-overlay] Auto-setup/onboarding skipped:', err.message);
@@ -1868,9 +1939,12 @@ async function handleFulfill(params, env, cliPath) {
   ], { env });
   const output = parseCliOutput(cliResult.stdout);
   if (!output.success) throw new Error(`Fulfill failed: ${output.error}`);
-  
+
+  // Clean up the request ID from tracking since it's now fulfilled
+  wokenRequests.delete(requestId);
+
   writeActivityEvent({ type: 'service_fulfilled', emoji: '✅', serviceId, recipientKey: recipientKey?.slice(0, 16), message: `Fulfilled ${serviceId} request — response sent` });
-  
+
   return output.data;
 }
 
