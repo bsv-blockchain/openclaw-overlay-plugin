@@ -14,7 +14,7 @@ A Clawdbot plugin that connects your agent to the **BSV Overlay Network** — a 
 ## Install
 
 ```bash
-clawdbot plugins install @johngalt5/bsv-overlay
+clawdbot plugins install @bsv/openclaw-overlay-plugin
 ```
 
 That's it. The plugin auto-initializes your wallet on first startup.
