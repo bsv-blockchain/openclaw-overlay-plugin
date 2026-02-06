@@ -5,7 +5,7 @@
  * All business logic is in the scripts/ modules.
  */
 
-import { fail } from './scripts/output.js';
+import { ok, fail } from './scripts/output.js';
 
 // Wallet commands
 import { cmdSetup, cmdIdentity, cmdAddress } from './scripts/wallet/setup.js';
@@ -59,6 +59,27 @@ const [, , command, ...args] = process.argv;
 async function main() {
   try {
     switch (command) {
+      // Help
+      case 'help':
+      case '--help':
+      case '-h':
+        ok({
+          usage: 'openclaw-overlay <command> [args...]',
+          commands: {
+            wallet: ['setup', 'identity', 'address', 'balance', 'import <txid> [vout]', 'refund <address>'],
+            registration: ['register', 'unregister'],
+            services: ['services', 'advertise <id> <name> <priceSats> [desc]', 'readvertise <id> [name] [priceSats] [desc]', 'remove <id>'],
+            discovery: ['discover [--service <type>] [--agent <name>]'],
+            payments: ['pay <pubkey> <sats> [desc]', 'verify <beef>', 'accept <beef> <prefix> <suffix> <senderKey> [desc]'],
+            messaging: ['send <key> <type> <json>', 'inbox', 'ack', 'poll', 'connect'],
+            'service-requests': ['request-service <key> <serviceId> <sats> [input]', 'service-queue', 'respond-service <reqId> <key> <serviceId> <result>'],
+            research: ['research-queue', 'research-respond <reqId>'],
+            'x-verification': ['x-verify-start <handle>', 'x-verify-complete <handle>', 'x-verifications', 'x-lookup <handle>', 'x-engagement-queue', 'x-engagement-fulfill <reqId> <result>'],
+            baemail: ['baemail-setup <price> <xHandle> <forwardEmail> <greeting>', 'baemail-config', 'baemail-block <sender>', 'baemail-unblock <sender>', 'baemail-log [limit]', 'baemail-refund <msgId>'],
+          },
+        });
+        break;
+
       // Wallet
       case 'setup':
         await cmdSetup();
