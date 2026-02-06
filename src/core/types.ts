@@ -91,6 +91,41 @@ export interface AcceptResult {
   accepted: boolean;
 }
 
+/** Payment currency type. */
+export type PaymentCurrency = 'bsv' | 'mnee';
+
+/** Result from sending an MNEE payment. */
+export interface MneePaymentResult {
+  /** Payment type identifier. */
+  paymentType: 'mnee';
+  /** Transaction ID (hex), if available. */
+  txid?: string;
+  /** MNEE ticket/transfer ID, if available. */
+  ticketId?: string;
+  /** Amount in USD. */
+  amountUsd: number;
+  /** Amount in atomic MNEE units. */
+  amountAtomic: number;
+  /** Sender's BSV address. */
+  senderAddress: string;
+  /** Sender's identity key (compressed hex). */
+  senderIdentityKey: string;
+}
+
+/** Result from verifying an incoming MNEE payment. */
+export interface MneeVerifyResult {
+  /** Whether the payment is valid. */
+  valid: boolean;
+  /** Transaction ID (hex). */
+  txid: string;
+  /** Amount in USD. */
+  amountUsd: number;
+  /** Amount in atomic MNEE units. */
+  amountAtomic: number;
+  /** Errors encountered during verification. */
+  errors: string[];
+}
+
 /** Serializable wallet identity info, persisted alongside the SQLite database. */
 export interface WalletIdentity {
   /** The root private key (hex). Guard this carefully. */

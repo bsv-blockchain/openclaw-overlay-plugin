@@ -34,21 +34,31 @@ export async function cmdServices(): Promise<never> {
 
 /**
  * Advertise command: add a new service advertisement.
+ *
+ * @param priceUsdStr - Optional USD price for MNEE payments
+ * @param acceptedCurrenciesStr - Optional comma-separated list of accepted currencies (e.g. "bsv,mnee")
  */
 export async function cmdAdvertise(
   serviceId: string | undefined,
   name: string | undefined,
   priceSatsStr: string | undefined,
-  description?: string
+  description?: string,
+  priceUsdStr?: string,
+  acceptedCurrenciesStr?: string
 ): Promise<never> {
   if (!serviceId || !name || !priceSatsStr) {
-    return fail('Usage: advertise <serviceId> <name> <priceSats> [description]');
+    return fail('Usage: advertise <serviceId> <name> <priceSats> [description] [priceUsd] [acceptedCurrencies]');
   }
 
   const priceSats = parseInt(priceSatsStr, 10);
   if (isNaN(priceSats) || priceSats < 0) {
     return fail('priceSats must be a non-negative integer');
   }
+
+  const priceUsd = priceUsdStr ? parseFloat(priceUsdStr) : undefined;
+  const acceptedCurrencies = acceptedCurrenciesStr
+    ? (acceptedCurrenciesStr.split(',').map(c => c.trim()) as ('bsv' | 'mnee')[])
+    : undefined;
 
   const BSVAgentWallet = await getBSVAgentWallet();
   const wallet = await BSVAgentWallet.load({ network: NETWORK, storageDir: WALLET_DIR });
@@ -68,6 +78,8 @@ export async function cmdAdvertise(
     name,
     description: description || `${name} service`,
     priceSats,
+    ...(priceUsd !== undefined && { priceUsd }),
+    ...(acceptedCurrencies && { acceptedCurrencies }),
     registeredAt: new Date().toISOString(),
   };
 
@@ -82,6 +94,8 @@ export async function cmdAdvertise(
     pricing: {
       model: 'per-task',
       amountSats: priceSats,
+      ...(priceUsd !== undefined && { amountUsd: priceUsd }),
+      ...(acceptedCurrencies && { acceptedCurrencies }),
     },
     timestamp: new Date().toISOString(),
   };
@@ -131,15 +145,20 @@ export async function cmdRemove(serviceId: string | undefined): Promise<never> {
 
 /**
  * Readvertise command: update an existing service advertisement.
+ *
+ * @param priceUsdStr - Optional updated USD price for MNEE payments
+ * @param acceptedCurrenciesStr - Optional comma-separated list of accepted currencies
  */
 export async function cmdReadvertise(
   serviceId: string | undefined,
   name?: string,
   priceSatsStr?: string,
-  description?: string
+  description?: string,
+  priceUsdStr?: string,
+  acceptedCurrenciesStr?: string
 ): Promise<never> {
   if (!serviceId) {
-    return fail('Usage: readvertise <serviceId> [name] [priceSats] [description]');
+    return fail('Usage: readvertise <serviceId> [name] [priceSats] [description] [priceUsd] [acceptedCurrencies]');
   }
 
   const services = loadServices();
@@ -163,6 +182,12 @@ export async function cmdReadvertise(
     existing.priceSats = priceSats;
   }
   if (description) existing.description = description;
+  if (priceUsdStr) {
+    existing.priceUsd = parseFloat(priceUsdStr);
+  }
+  if (acceptedCurrenciesStr) {
+    existing.acceptedCurrencies = acceptedCurrenciesStr.split(',').map(c => c.trim()) as ('bsv' | 'mnee')[];
+  }
   existing.registeredAt = new Date().toISOString();
 
   // Publish update on-chain (matches clawdbot-overlay server schema)
@@ -176,6 +201,8 @@ export async function cmdReadvertise(
     pricing: {
       model: 'per-task',
       amountSats: existing.priceSats,
+      ...(existing.priceUsd !== undefined && { amountUsd: existing.priceUsd }),
+      ...(existing.acceptedCurrencies && { acceptedCurrencies: existing.acceptedCurrencies }),
     },
     timestamp: existing.registeredAt,
   };

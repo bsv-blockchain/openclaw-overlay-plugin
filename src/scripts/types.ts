@@ -28,6 +28,8 @@ export interface ServiceAdvertisement {
   name: string;
   description: string;
   priceSats: number;
+  priceUsd?: number;
+  acceptedCurrencies?: ('bsv' | 'mnee')[];
   txid?: string;
   registeredAt?: string;
 }

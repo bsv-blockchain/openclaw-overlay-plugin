@@ -52,6 +52,23 @@
           "type": "string"
         },
         "description": "List of service IDs to auto-advertise on registration"
+      },
+      "mneeEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable MNEE stablecoin payment support (requires @mnee/ts-sdk)"
+      },
+      "dailyBudgetUsd": {
+        "type": "number",
+        "default": 5.0,
+        "minimum": 0,
+        "description": "Maximum total USD to spend per day via MNEE payments"
+      },
+      "maxAutoPayUsd": {
+        "type": "number",
+        "default": 2.0,
+        "minimum": 0,
+        "description": "Maximum USD to auto-pay per MNEE service request without confirmation"
       }
     }
   },
@@ -97,6 +114,23 @@
     "services": {
       "label": "Auto-Advertise Services",
       "help": "Service IDs to automatically advertise when registering",
+      "advanced": true
+    },
+    "mneeEnabled": {
+      "label": "Enable MNEE Stablecoin",
+      "help": "Enable USD-pegged MNEE stablecoin payments alongside native BSV",
+      "advanced": true
+    },
+    "dailyBudgetUsd": {
+      "label": "Daily Budget (USD)",
+      "placeholder": "5.00",
+      "help": "Total daily MNEE spending limit in USD",
+      "advanced": true
+    },
+    "maxAutoPayUsd": {
+      "label": "Max Auto-Pay (USD)",
+      "placeholder": "2.00",
+      "help": "MNEE requests above this USD amount will ask for confirmation",
       "advanced": true
     }
   }

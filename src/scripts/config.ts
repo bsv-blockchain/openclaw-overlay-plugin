@@ -62,6 +62,12 @@ export const LOOKUP_SERVICES = {
   X_VERIFICATIONS: 'ls_clawdbot_x_verifications',
 } as const;
 
+/** Whether MNEE stablecoin support is enabled */
+export const MNEE_ENABLED = process.env.MNEE_ENABLED === 'true';
+
+/** Optional MNEE API key */
+export const MNEE_API_KEY = process.env.MNEE_API_KEY || '';
+
 /** Paths derived from config */
 export const PATHS = {
   walletIdentity: path.join(WALLET_DIR, 'wallet-identity.json'),

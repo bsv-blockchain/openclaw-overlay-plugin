@@ -14,6 +14,10 @@ export interface ServiceDefinition {
   description: string;
   /** Default price in satoshis */
   defaultPrice: number;
+  /** Default price in USD (for MNEE payments) */
+  defaultPriceUsd?: number;
+  /** Accepted payment currencies (defaults to ['bsv']) */
+  acceptedCurrencies?: ('bsv' | 'mnee')[];
   /** Optional JSON schema for input validation */
   inputSchema?: object;
   /** Optional legacy handler for non-agent mode */
@@ -71,6 +75,10 @@ export interface PaymentInfo {
   txid: string;
   /** Amount paid in satoshis */
   satoshis: number;
+  /** Amount paid in USD (for MNEE payments) */
+  amountUsd?: number;
+  /** Payment currency ('bsv' or 'mnee') */
+  currency?: 'bsv' | 'mnee';
   /** Whether payment was accepted by wallet */
   accepted: boolean;
   /** Payment verification details */

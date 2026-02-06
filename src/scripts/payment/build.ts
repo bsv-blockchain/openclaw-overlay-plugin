@@ -10,6 +10,8 @@
 
 import { NETWORK, WALLET_DIR } from '../config.js';
 import type { PaymentResult } from './types.js';
+import type { MneePaymentResult } from '../../core/types.js';
+import { loadWalletIdentity } from '../wallet/identity.js';
 
 import { BSVAgentWallet } from '../../core/index.js';
 
@@ -62,4 +64,32 @@ export async function buildDirectPayment(
   } finally {
     await wallet.destroy();
   }
+}
+
+/**
+ * Build an MNEE stablecoin payment.
+ *
+ * MNEE broadcasts immediately on the sender side via the cosigner.
+ * No BEEF/derivation data is needed — the recipient receives tokens automatically.
+ *
+ * @param recipientAddress - Recipient's BSV address
+ * @param amountUsd - Amount to send in USD
+ * @param desc - Optional description
+ * @returns MneePaymentResult with txid and amount info
+ */
+export async function buildMneePayment(
+  recipientAddress: string,
+  amountUsd: number,
+  desc?: string
+): Promise<MneePaymentResult> {
+  const { deriveWifAndAddress, sendMnee } = await import('../../core/mnee.js');
+  const identity = loadWalletIdentity();
+  const { wif } = await deriveWifAndAddress(identity.rootKeyHex);
+
+  return await sendMnee({
+    recipientAddress,
+    amountUsd,
+    senderWif: wif,
+    description: desc,
+  });
 }

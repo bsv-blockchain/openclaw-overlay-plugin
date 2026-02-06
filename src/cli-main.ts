@@ -5,7 +5,7 @@
  * All business logic is in the scripts/ modules.
  */
 
-import { fail } from './scripts/output.js';
+import { fail, ok } from './scripts/output.js';
 
 // Wallet commands
 import { cmdSetup, cmdIdentity, cmdAddress } from './scripts/wallet/setup.js';
@@ -134,7 +134,7 @@ async function main() {
         await cmdConnect();
         break;
       case 'request-service':
-        await cmdRequestService(args[0], args[1], args[2], args[3]);
+        await cmdRequestService(args[0], args[1], args[2], args[3], args[4], args[5]);
         break;
       case 'research-respond':
         await cmdResearchRespond(args[0]);
@@ -171,6 +171,29 @@ async function main() {
         await cmdXEngagementFulfill(args[0], args[1]);
         break;
 
+      // MNEE Stablecoin
+      case 'mnee-balance': {
+        const { loadWalletIdentity } = await import('./scripts/wallet/identity.js');
+        const { deriveWifAndAddress, getMneeBalance } = await import('./core/mnee.js');
+        const identity = loadWalletIdentity();
+        const { address } = await deriveWifAndAddress(identity.rootKeyHex);
+        const bal = await getMneeBalance(address);
+        ok({ address, ...bal });
+        break;
+      }
+      case 'mnee-pay': {
+        const { buildMneePayment } = await import('./scripts/payment/build.js');
+        const recipientAddr = args[0];
+        const amountUsd = parseFloat(args[1] || '0');
+        const desc = args.slice(2).join(' ') || undefined;
+        if (!recipientAddr || amountUsd <= 0) {
+          fail('Usage: mnee-pay <address> <amountUsd> [description]');
+        }
+        const result = await buildMneePayment(recipientAddr, amountUsd, desc);
+        ok(result);
+        break;
+      }
+
       // Baemail Service
       case 'baemail-setup':
         await cmdBaemailSetup(args[0], args[1], args[2], args[3]);
@@ -196,7 +219,8 @@ async function main() {
           `Unknown command: ${command || '(none)'}. Commands: setup, identity, address, balance, import, refund, ` +
             `register, unregister, services, advertise, readvertise, remove, discover, pay, verify, accept, ` +
             `send, inbox, ack, poll, connect, request-service, research-queue, research-respond, ` +
-            `service-queue, respond-service, x-verify-start, x-verify-complete, x-verifications, x-lookup, ` +
+            `service-queue, respond-service, mnee-balance, mnee-pay, ` +
+            `x-verify-start, x-verify-complete, x-verifications, x-lookup, ` +
             `x-engagement-queue, x-engagement-fulfill, baemail-setup, baemail-config, baemail-block, ` +
             `baemail-unblock, baemail-log, baemail-refund`
         );

@@ -31,6 +31,9 @@ export type {
   VerifyResult,
   AcceptParams,
   AcceptResult,
+  PaymentCurrency,
+  MneePaymentResult,
+  MneeVerifyResult,
 } from './types.js';
 
 // Config helpers (for advanced use)
@@ -40,3 +43,11 @@ export type { Chain } from './config.js';
 // Lower-level helpers (for advanced use)
 export { buildPayment } from './payment.js';
 export { verifyPayment, acceptPayment } from './verify.js';
+
+// MNEE stablecoin helpers (lazy-loaded, optional dependency)
+export {
+  deriveWifAndAddress,
+  getMneeBalance,
+  sendMnee,
+  verifyMneePayment,
+} from './mnee.js';

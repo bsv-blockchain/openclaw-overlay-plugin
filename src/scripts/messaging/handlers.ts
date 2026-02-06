@@ -57,36 +57,95 @@ async function getNetwork(): Promise<'mainnet' | 'testnet'> {
 
 /**
  * Verify and accept a payment from a service request.
- * Uses a2a-bsv wallet.acceptPayment() for proper BRC-29 handling.
+ * Supports both BSV (BRC-29 BEEF) and MNEE stablecoin payments.
  */
 export async function verifyAndAcceptPayment(
   payment: any,
   minSats: number,
   senderKey: string,
   serviceId: string,
-  ourHash160: Uint8Array
+  ourHash160: Uint8Array,
+  minUsd?: number
 ): Promise<{
   accepted: boolean;
   txid: string | null;
   satoshis: number;
+  amountUsd?: number;
+  currency: 'bsv' | 'mnee';
   outputIndex: number;
   walletAccepted: boolean;
   error: string | null;
 }> {
   if (!payment) {
-    return { accepted: false, txid: null, satoshis: 0, outputIndex: 0, walletAccepted: false, error: 'no payment' };
+    return { accepted: false, txid: null, satoshis: 0, currency: 'bsv', outputIndex: 0, walletAccepted: false, error: 'no payment' };
   }
 
   if (payment.error) {
-    return { accepted: false, txid: null, satoshis: 0, outputIndex: 0, walletAccepted: false, error: payment.error };
+    return { accepted: false, txid: null, satoshis: 0, currency: 'bsv', outputIndex: 0, walletAccepted: false, error: payment.error };
   }
 
+  // --- MNEE payment path ---
+  if (payment.paymentType === 'mnee') {
+    if (!payment.txid) {
+      return { accepted: false, txid: null, satoshis: 0, amountUsd: 0, currency: 'mnee', outputIndex: 0, walletAccepted: false, error: 'missing MNEE txid' };
+    }
+
+    try {
+      const { verifyMneePayment, deriveWifAndAddress } = await import('../../core/mnee.js');
+      const walletIdentity = loadWalletIdentity();
+      const { address: ourAddress } = await deriveWifAndAddress(walletIdentity.rootKeyHex);
+
+      const verifyResult = await verifyMneePayment({
+        txid: payment.txid,
+        receiverAddress: ourAddress,
+        expectedAmountUsd: minUsd,
+      });
+
+      if (!verifyResult.valid) {
+        return {
+          accepted: false,
+          txid: payment.txid,
+          satoshis: 0,
+          amountUsd: verifyResult.amountUsd,
+          currency: 'mnee',
+          outputIndex: 0,
+          walletAccepted: false,
+          error: `MNEE verification failed: ${verifyResult.errors.join(', ')}`,
+        };
+      }
+
+      // MNEE tokens arrive automatically (sender-side broadcast), no acceptPayment needed
+      return {
+        accepted: true,
+        txid: payment.txid,
+        satoshis: 0,
+        amountUsd: verifyResult.amountUsd,
+        currency: 'mnee',
+        outputIndex: 0,
+        walletAccepted: true,
+        error: null,
+      };
+    } catch (err: any) {
+      return {
+        accepted: false,
+        txid: payment.txid || null,
+        satoshis: 0,
+        amountUsd: 0,
+        currency: 'mnee',
+        outputIndex: 0,
+        walletAccepted: false,
+        error: `MNEE verification error: ${err.message}`,
+      };
+    }
+  }
+
+  // --- BSV payment path (existing logic) ---
   if (!payment.beef || !payment.satoshis) {
-    return { accepted: false, txid: null, satoshis: 0, outputIndex: 0, walletAccepted: false, error: 'missing beef or satoshis' };
+    return { accepted: false, txid: null, satoshis: 0, currency: 'bsv', outputIndex: 0, walletAccepted: false, error: 'missing beef or satoshis' };
   }
 
   if (payment.satoshis < minSats) {
-    return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, outputIndex: 0, walletAccepted: false, error: `insufficient payment: ${payment.satoshis} < ${minSats}` };
+    return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, currency: 'bsv', outputIndex: 0, walletAccepted: false, error: `insufficient payment: ${payment.satoshis} < ${minSats}` };
   }
 
   // Accept the payment using a2a-bsv wallet
@@ -99,7 +158,7 @@ export async function verifyAndAcceptPayment(
     const verifyResult = await wallet.verifyPayment({ beef: payment.beef });
     if (!verifyResult.valid) {
       await wallet.destroy();
-      return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, outputIndex: 0, walletAccepted: false, error: `verification failed: ${verifyResult.errors.join(', ')}` };
+      return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, currency: 'bsv', outputIndex: 0, walletAccepted: false, error: `verification failed: ${verifyResult.errors.join(', ')}` };
     }
 
     // Accept the payment (this broadcasts the transaction)
@@ -114,20 +173,21 @@ export async function verifyAndAcceptPayment(
     await wallet.destroy();
 
     if (!acceptResult.accepted) {
-      return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, outputIndex: 0, walletAccepted: false, error: 'wallet rejected payment' };
+      return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, currency: 'bsv', outputIndex: 0, walletAccepted: false, error: 'wallet rejected payment' };
     }
 
     return {
       accepted: true,
       txid: payment.txid,
       satoshis: payment.satoshis,
+      currency: 'bsv',
       outputIndex: 0,
       walletAccepted: true,
       error: null,
     };
   } catch (err: any) {
     await wallet.destroy();
-    return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, outputIndex: 0, walletAccepted: false, error: err.message };
+    return { accepted: false, txid: payment.txid || null, satoshis: payment.satoshis, currency: 'bsv', outputIndex: 0, walletAccepted: false, error: err.message };
   }
 }
 
@@ -167,6 +227,7 @@ async function queueForAgent(
   const sdk = await getSdk();
   const payment = msg.payload?.payment as any;
   const input = msg.payload?.input || msg.payload;
+  const paymentCurrency: 'bsv' | 'mnee' = payment?.paymentType === 'mnee' ? 'mnee' : 'bsv';
 
   // Verify and accept payment
   const walletIdentity = loadWalletIdentity();
@@ -174,10 +235,12 @@ async function queueForAgent(
 
   // Find the service price using the service registry
   const serviceDefinition = serviceManager.registry.get(serviceId);
-  let minPrice = 5; // default fallback
+  let minPriceSats = 5; // default fallback
+  let minPriceUsd: number | undefined;
 
   if (serviceDefinition) {
-    minPrice = serviceDefinition.defaultPrice;
+    minPriceSats = serviceDefinition.defaultPrice;
+    minPriceUsd = serviceDefinition.defaultPriceUsd;
 
     // Validate service input if possible
     const validation = serviceManager.validate(serviceId, input);
@@ -226,10 +289,15 @@ async function queueForAgent(
     // Fall back to legacy service loading for backward compatibility
     const services = loadServices();
     const svc = services.find(s => s.serviceId === serviceId);
-    minPrice = svc?.priceSats || 5;
+    minPriceSats = svc?.priceSats || 5;
+    minPriceUsd = svc?.priceUsd;
   }
 
-  const payResult = await verifyAndAcceptPayment(payment, minPrice, msg.from, serviceId, ourHash160);
+  // Use currency-aware minimum price check
+  const effectiveMinSats = paymentCurrency === 'mnee' ? 0 : minPriceSats;
+  const effectiveMinUsd = paymentCurrency === 'mnee' ? minPriceUsd : undefined;
+
+  const payResult = await verifyAndAcceptPayment(payment, effectiveMinSats, msg.from, serviceId, ourHash160, effectiveMinUsd);
   if (!payResult.accepted) {
     // Send rejection
     const rejectPayload = { requestId: msg.id, serviceId, status: 'rejected', reason: `Payment rejected: ${payResult.error}` };
@@ -251,6 +319,7 @@ async function queueForAgent(
       paymentTxid: null,
       satoshisReceived: 0,
       walletAccepted: false,
+      paymentCurrency,
       error: payResult.error,
       _ts: Date.now(),
     };
@@ -269,6 +338,8 @@ async function queueForAgent(
     input: input,
     paymentTxid: payResult.txid,
     satoshisReceived: payResult.satoshis,
+    paymentCurrency,
+    amountUsdReceived: payResult.amountUsd,
     walletAccepted: payResult.walletAccepted,
     _ts: Date.now(),
   };
@@ -283,6 +354,8 @@ async function queueForAgent(
     paymentAccepted: true,
     paymentTxid: payResult.txid,
     satoshisReceived: payResult.satoshis,
+    paymentCurrency,
+    amountUsdReceived: payResult.amountUsd,
     from: msg.from,
     ack: true,
   };

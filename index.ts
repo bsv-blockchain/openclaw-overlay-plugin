@@ -31,7 +31,8 @@ const BUDGET_FILE = 'daily-spending.json';
 interface DailySpending {
   date: string; // YYYY-MM-DD
   totalSats: number;
-  transactions: Array<{ ts: number; sats: number; service: string; provider: string }>;
+  totalUsd: number;
+  transactions: Array<{ ts: number; sats: number; amountUsd?: number; currency?: string; service: string; provider: string }>;
 }
 
 function getBudgetPath(walletDir: string): string {
@@ -43,11 +44,15 @@ function loadDailySpending(walletDir: string): DailySpending {
   const budgetPath = getBudgetPath(walletDir);
   try {
     const data = JSON.parse(fs.readFileSync(budgetPath, 'utf-8'));
-    if (data.date === today) return data;
+    if (data.date === today) {
+      // Ensure totalUsd exists for legacy data
+      if (data.totalUsd === undefined) data.totalUsd = 0;
+      return data;
+    }
   } catch {
     // Ignore parse errors - return fresh daily spending for corrupted/missing file
   }
-  return { date: today, totalSats: 0, transactions: [] };
+  return { date: today, totalSats: 0, totalUsd: 0, transactions: [] };
 }
 
 function writeActivityEvent(event) {
@@ -58,10 +63,11 @@ function writeActivityEvent(event) {
   } catch {}
 }
 
-function recordSpend(walletDir: string, sats: number, service: string, provider: string) {
+function recordSpend(walletDir: string, sats: number, service: string, provider: string, amountUsd?: number, currency?: string) {
   const spending = loadDailySpending(walletDir);
   spending.totalSats += sats;
-  spending.transactions.push({ ts: Date.now(), sats, service, provider });
+  if (amountUsd) spending.totalUsd += amountUsd;
+  spending.transactions.push({ ts: Date.now(), sats, amountUsd, currency, service, provider });
   fs.writeFileSync(getBudgetPath(walletDir), JSON.stringify(spending, null, 2));
 }
 
@@ -72,6 +78,16 @@ function checkBudget(walletDir: string, requestedSats: number, dailyLimit: numbe
     allowed: remaining >= requestedSats,
     remaining,
     spent: spending.totalSats
+  };
+}
+
+function checkBudgetUsd(walletDir: string, requestedUsd: number, dailyLimitUsd: number): { allowed: boolean; remainingUsd: number; spentUsd: number } {
+  const spending = loadDailySpending(walletDir);
+  const remaining = dailyLimitUsd - spending.totalUsd;
+  return {
+    allowed: remaining >= requestedUsd,
+    remainingUsd: remaining,
+    spentUsd: spending.totalUsd
   };
 }
 
@@ -543,11 +559,12 @@ export default function register(api) {
         action: {
           type: "string",
           enum: [
-            "request", "discover", "balance", "status", "pay", 
-            "setup", "address", "import", "register", "advertise", 
+            "request", "discover", "balance", "status", "pay",
+            "setup", "address", "import", "register", "advertise",
             "readvertise", "remove", "send", "inbox", "services", "refund",
             "onboard", "pending-requests", "fulfill",
-            "unregister", "remove-service"
+            "unregister", "remove-service",
+            "mnee-balance", "mnee-pay"
           ],
           description: "Action to perform"
         },
@@ -643,6 +660,25 @@ export default function register(api) {
         result: {
           type: "object",
           description: "Service result for fulfill"
+        },
+        // MNEE payment parameters
+        paymentType: {
+          type: "string",
+          enum: ["bsv", "mnee"],
+          description: "Payment currency: 'bsv' (default) or 'mnee' (MNEE stablecoin)"
+        },
+        amountUsd: {
+          type: "number",
+          description: "Amount in USD for MNEE payments"
+        },
+        priceUsd: {
+          type: "number",
+          description: "Service price in USD for MNEE payments (advertise/readvertise)"
+        },
+        acceptedCurrencies: {
+          type: "array",
+          items: { type: "string", enum: ["bsv", "mnee"] },
+          description: "Accepted payment currencies for advertise/readvertise"
         }
       },
       required: ["action"]
@@ -1221,16 +1257,23 @@ async function executeOverlayAction(params, config, api) {
 
     case "remove-service":
       return await handleRemoveService(params, env, cliPath);
-    
+
+    case "mnee-balance":
+      return await handleMneeBalance(env, cliPath);
+
+    case "mnee-pay":
+      return await handleMneePay(params, env, cliPath, config);
+
     default:
       throw new Error(`Unknown action: ${action}`);
   }
 }
 
 async function handleServiceRequest(params, env, cliPath, config, api) {
-  const { service, identityKey: targetKey, input, maxPrice } = params;
+  const { service, identityKey: targetKey, input, maxPrice, paymentType, amountUsd } = params;
   const walletDir = config?.walletDir || path.join(process.env.HOME || '', '.clawdbot', 'bsv-wallet');
-  
+  const currency = paymentType === 'mnee' ? 'mnee' : 'bsv';
+
   if (!service) {
     throw new Error("Service is required for request action");
   }
@@ -1238,7 +1281,7 @@ async function handleServiceRequest(params, env, cliPath, config, api) {
   // 1. Discover providers for the service
   const discoverResult = await execFileAsync('node', [cliPath, 'discover', '--service', service], { env });
   const discoverOutput = parseCliOutput(discoverResult.stdout);
-  
+
   if (!discoverOutput.success) {
     throw new Error(`Discovery failed: ${discoverOutput.error}`);
   }
@@ -1253,7 +1296,7 @@ async function handleServiceRequest(params, env, cliPath, config, api) {
   const identityResult = await execFileAsync('node', [cliPath, 'identity'], { env });
   const identityOutput = parseCliOutput(identityResult.stdout);
   const ourKey = identityOutput.data?.identityKey;
-  
+
   let externalProviders = providers.filter(p => p.identityKey !== ourKey);
   if (externalProviders.length === 0) {
     throw new Error("No external providers available (only found our own services)");
@@ -1268,16 +1311,86 @@ async function handleServiceRequest(params, env, cliPath, config, api) {
     externalProviders = targeted;
   }
 
-  // 3. Sort by price - FIX: Use pricing.amountSats instead of pricingSats
-  externalProviders.sort((a, b) => (a.pricing?.amountSats || 0) - (b.pricing?.amountSats || 0));
-  
+  // 2c. If paying with MNEE, filter to providers that accept it
+  if (currency === 'mnee') {
+    const mneeProviders = externalProviders.filter(p => {
+      const accepted = p.pricing?.acceptedCurrencies || ['bsv'];
+      return accepted.includes('mnee');
+    });
+    if (mneeProviders.length > 0) {
+      externalProviders = mneeProviders;
+    }
+    // If no provider explicitly advertises MNEE, still try — they may accept it
+  }
+
+  // 3. Sort by price
+  if (currency === 'mnee') {
+    externalProviders.sort((a, b) => (a.pricing?.amountUsd || 0) - (b.pricing?.amountUsd || 0));
+  } else {
+    externalProviders.sort((a, b) => (a.pricing?.amountSats || 0) - (b.pricing?.amountSats || 0));
+  }
+
   const bestProvider = externalProviders[0];
-  const price = bestProvider.pricing?.amountSats || 0;
+  const priceSats = bestProvider.pricing?.amountSats || 0;
+  const priceUsd = bestProvider.pricing?.amountUsd || (amountUsd || 0);
+
+  if (currency === 'mnee') {
+    // MNEE payment flow
+    const effectiveUsd = amountUsd || priceUsd;
+    if (effectiveUsd <= 0) {
+      throw new Error('amountUsd is required for MNEE payments');
+    }
+
+    // Check USD budget
+    const dailyLimitUsd = config.dailyBudgetUsd || 5.0;
+    const maxAutoPayUsd = config.maxAutoPayUsd || 2.0;
+    if (effectiveUsd > (maxPrice || maxAutoPayUsd)) {
+      throw new Error(`MNEE price ($${effectiveUsd.toFixed(2)}) exceeds limit ($${(maxPrice || maxAutoPayUsd).toFixed(2)})`);
+    }
+    const budgetCheckUsd = checkBudgetUsd(walletDir, effectiveUsd, dailyLimitUsd);
+    if (!budgetCheckUsd.allowed) {
+      throw new Error(`MNEE request would exceed daily USD budget. Spent: $${budgetCheckUsd.spentUsd.toFixed(2)}, Remaining: $${budgetCheckUsd.remainingUsd.toFixed(2)}, Requested: $${effectiveUsd.toFixed(2)}.`);
+    }
+
+    api.logger.info(`Requesting service ${service} from ${bestProvider.name} for $${effectiveUsd.toFixed(2)} MNEE`);
+
+    const requestArgs = [cliPath, 'request-service', bestProvider.identityKey, service, '0'];
+    if (input) {
+      requestArgs.push(JSON.stringify(input));
+    } else {
+      requestArgs.push('null');
+    }
+    requestArgs.push('mnee', effectiveUsd.toString());
+
+    const requestResult = await execFileAsync('node', requestArgs, { env });
+    const requestOutput = parseCliOutput(requestResult.stdout);
+
+    if (!requestOutput.success) {
+      throw new Error(`Service request failed: ${requestOutput.error}`);
+    }
+
+    recordSpend(walletDir, 0, service, bestProvider.name, effectiveUsd, 'mnee');
+    writeActivityEvent({ type: 'outgoing_payment', emoji: '💸', sats: 0, amountUsd: effectiveUsd, currency: 'mnee', service, provider: bestProvider.name, message: `Paid $${effectiveUsd.toFixed(2)} MNEE to ${bestProvider.name} for ${service}` });
+
+    return {
+      provider: bestProvider.name,
+      providerKey: bestProvider.identityKey,
+      cost: effectiveUsd,
+      costUnit: 'usd',
+      paymentType: 'mnee',
+      status: "sent",
+      requestId: requestOutput.data?.requestId,
+      message: `Request sent and paid ($${effectiveUsd.toFixed(2)} MNEE) to ${bestProvider.name}. The response will be delivered asynchronously.`,
+    };
+  }
+
+  // BSV payment flow (existing logic)
+  const price = priceSats;
 
   // 4. Check price limits
   const maxAutoPaySats = config.maxAutoPaySats || 200;
   const userMaxPrice = maxPrice || maxAutoPaySats;
-  
+
   if (price > userMaxPrice) {
     throw new Error(`Service price (${price} sats) exceeds limit (${userMaxPrice} sats)`);
   }
@@ -1296,10 +1409,10 @@ async function handleServiceRequest(params, env, cliPath, config, api) {
   if (input) {
     requestArgs.push(JSON.stringify(input));
   }
-  
+
   const requestResult = await execFileAsync('node', requestArgs, { env });
   const requestOutput = parseCliOutput(requestResult.stdout);
-  
+
   if (!requestOutput.success) {
     throw new Error(`Service request failed: ${requestOutput.error}`);
   }
@@ -1308,13 +1421,15 @@ async function handleServiceRequest(params, env, cliPath, config, api) {
   // The WebSocket background service handles incoming responses
   // asynchronously and wakes the agent via /hooks/agent when a
   // response arrives. This avoids blocking for up to 120s.
-  recordSpend(walletDir, price, service, bestProvider.name);
+  recordSpend(walletDir, price, service, bestProvider.name, undefined, 'bsv');
   writeActivityEvent({ type: 'outgoing_payment', emoji: '💸', sats: price, service, provider: bestProvider.name, message: `Paid ${price} sats to ${bestProvider.name} for ${service}` });
-  
+
   return {
     provider: bestProvider.name,
     providerKey: bestProvider.identityKey,
     cost: price,
+    costUnit: 'sats',
+    paymentType: 'bsv',
     status: "sent",
     requestId: requestOutput.data?.messageId,
     message: `Request sent and paid (${price} sats) to ${bestProvider.name}. The response will be delivered asynchronously when the provider fulfills it.`,
@@ -1518,11 +1633,27 @@ async function handleDiscover(params, env, cliPath) {
 async function handleBalance(env, cliPath) {
   const result = await execFileAsync('node', [cliPath, 'balance'], { env });
   const output = parseCliOutput(result.stdout);
-  
+
   if (!output.success) {
     throw new Error(`Balance check failed: ${output.error}`);
   }
-  
+
+  // Attempt to include MNEE balance if enabled
+  const mneeEnabled = env.MNEE_ENABLED === 'true';
+  if (mneeEnabled) {
+    try {
+      const mneeResult = await execFileAsync('node', [cliPath, 'mnee-balance'], { env, timeout: 15000 });
+      const mneeOutput = parseCliOutput(mneeResult.stdout);
+      if (mneeOutput.success) {
+        output.data.mneeBalanceUsd = mneeOutput.data.balanceUsd;
+        output.data.mneeBalanceAtomic = mneeOutput.data.balanceAtomic;
+        output.data.mneeAddress = mneeOutput.data.address;
+      }
+    } catch {
+      // MNEE balance unavailable — skip silently
+    }
+  }
+
   return output.data;
 }
 
@@ -1685,44 +1816,56 @@ async function handleRegister(env, cliPath) {
 }
 
 async function handleAdvertise(params, env, cliPath) {
-  const { serviceId, name, description, priceSats } = params;
-  
+  const { serviceId, name, description, priceSats, priceUsd, acceptedCurrencies } = params;
+
   if (!serviceId || !name || !description || priceSats === undefined) {
     throw new Error("serviceId, name, description, and priceSats are required for advertise action");
   }
-  
-  const result = await execFileAsync('node', [cliPath, 'advertise', serviceId, name, description, priceSats.toString()], { env });
+
+  const args = [cliPath, 'advertise', serviceId, name, priceSats.toString(), description];
+  if (priceUsd !== undefined) {
+    args.push(priceUsd.toString());
+  } else {
+    args.push('');
+  }
+  if (acceptedCurrencies && Array.isArray(acceptedCurrencies)) {
+    args.push(acceptedCurrencies.join(','));
+  }
+
+  const result = await execFileAsync('node', args, { env });
   const output = parseCliOutput(result.stdout);
-  
+
   if (!output.success) {
     throw new Error(`Advertise failed: ${output.error}`);
   }
-  
+
   return output.data;
 }
 
 async function handleReadvertise(params, env, cliPath) {
-  const { serviceId, newPrice, newName, newDesc } = params;
-  
+  const { serviceId, newPrice, newName, newDesc, priceUsd, acceptedCurrencies } = params;
+
   if (!serviceId || newPrice === undefined) {
     throw new Error("serviceId and newPrice are required for readvertise action");
   }
-  
-  const args = [cliPath, 'readvertise', serviceId, newPrice.toString()];
-  if (newName) {
-    args.push(newName);
+
+  const args = [cliPath, 'readvertise', serviceId, newName || '', newPrice.toString(), newDesc || ''];
+  if (priceUsd !== undefined) {
+    args.push(priceUsd.toString());
+  } else {
+    args.push('');
   }
-  if (newDesc) {
-    args.push(newDesc);
+  if (acceptedCurrencies && Array.isArray(acceptedCurrencies)) {
+    args.push(acceptedCurrencies.join(','));
   }
-  
+
   const result = await execFileAsync('node', args, { env });
   const output = parseCliOutput(result.stdout);
-  
+
   if (!output.success) {
     throw new Error(`Readvertise failed: ${output.error}`);
   }
-  
+
   return output.data;
 }
 
@@ -1920,6 +2063,50 @@ async function handleFulfill(params, env, cliPath) {
   return output.data;
 }
 
+async function handleMneeBalance(env, cliPath) {
+  const result = await execFileAsync('node', [cliPath, 'mnee-balance'], { env, timeout: 15000 });
+  const output = parseCliOutput(result.stdout);
+
+  if (!output.success) {
+    throw new Error(`MNEE balance check failed: ${output.error}`);
+  }
+
+  return output.data;
+}
+
+async function handleMneePay(params, env, cliPath, config) {
+  const { address, amountUsd, description } = params;
+  const walletDir = config?.walletDir || path.join(process.env.HOME || '', '.clawdbot', 'bsv-wallet');
+
+  if (!address || !amountUsd) {
+    throw new Error("address and amountUsd are required for mnee-pay action");
+  }
+
+  // Check USD budget
+  const dailyLimitUsd = config?.dailyBudgetUsd || 5.0;
+  const budgetCheckUsd = checkBudgetUsd(walletDir, amountUsd, dailyLimitUsd);
+  if (!budgetCheckUsd.allowed) {
+    throw new Error(`MNEE payment would exceed daily USD budget. Spent: $${budgetCheckUsd.spentUsd.toFixed(2)}, Remaining: $${budgetCheckUsd.remainingUsd.toFixed(2)}, Requested: $${amountUsd.toFixed(2)}.`);
+  }
+
+  const args = [cliPath, 'mnee-pay', address, amountUsd.toString()];
+  if (description) {
+    args.push(description);
+  }
+
+  const result = await execFileAsync('node', args, { env, timeout: 30000 });
+  const output = parseCliOutput(result.stdout);
+
+  if (!output.success) {
+    throw new Error(`MNEE payment failed: ${output.error}`);
+  }
+
+  recordSpend(walletDir, 0, 'mnee-direct-payment', address, amountUsd, 'mnee');
+  writeActivityEvent({ type: 'outgoing_payment', emoji: '💸', sats: 0, amountUsd, currency: 'mnee', service: 'mnee-direct-payment', provider: address?.slice(0, 16), message: `MNEE payment: $${amountUsd.toFixed(2)} sent` });
+
+  return output.data;
+}
+
 function buildEnvironment(config) {
   const env = { ...process.env };
 
@@ -1945,6 +2132,14 @@ function buildEnvironment(config) {
     env.AGENT_DESCRIPTION = 'AI agent on the OpenClaw Overlay Network. Offers services for BSV micropayments.';
   }
   env.AGENT_ROUTED = 'true'; // Route service requests through the agent
+
+  // MNEE stablecoin config
+  if (config.mneeEnabled) {
+    env.MNEE_ENABLED = 'true';
+  }
+  if (config.mneeApiKey) {
+    env.MNEE_API_KEY = config.mneeApiKey;
+  }
 
   return env;
 }
