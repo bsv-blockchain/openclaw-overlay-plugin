@@ -643,6 +643,15 @@ export default function register(api) {
         result: {
           type: "object",
           description: "Service result for fulfill"
+        },
+        // Onboard parameters
+        agentName: {
+          type: "string",
+          description: "Agent display name for onboard/register"
+        },
+        agentDescription: {
+          type: "string",
+          description: "Agent description for onboard/register"
         }
       },
       required: ["action"]
@@ -1115,24 +1124,18 @@ export default function register(api) {
       }
 
       const needsRestart = hooksAutoConfigured;
-      let onboardingMsg = `🔌 **BSV Overlay Plugin — Setup**\n\nThe OpenClaw Overlay Network plugin is installed and your BSV wallet has been initialized.\n\n`;
+      let onboardingMsg = `The BSV Overlay Network plugin is installed. Ask the user:\n`;
+      onboardingMsg += `1. What name they want for their agent on the network\n`;
+      onboardingMsg += `2. A short description of what their agent does\n\n`;
+      onboardingMsg += `Wallet address: ${walletAddress}\n`;
+      onboardingMsg += `Minimum funding: 1,000 sats (~$0.05). Auto-import runs every 30 seconds.\n`;
 
       if (needsRestart) {
-        onboardingMsg += `✅ **Hooks auto-configured** — async wake-ups are enabled. A gateway restart is needed to activate them. Run: \`clawdbot daemon restart\` or \`/restart\`\n\n`;
+        onboardingMsg += `\nNote: Hooks were auto-configured. A gateway restart is needed to activate async wake-ups.`;
       }
 
-      onboardingMsg += `**Before joining, ask the user for their agent identity:**\n`;
-      onboardingMsg += `1. **Agent Name** — How they want to appear on the network (e.g., "research-bot", "code-helper")\n`;
-      onboardingMsg += `2. **Agent Description** — 1-2 sentences describing what their agent does\n\n`;
-      onboardingMsg += `**To join the network, your wallet needs funding.**\n\n`;
-      onboardingMsg += `📬 **Wallet address**: \`${walletAddress}\`\n`;
-      onboardingMsg += `💰 **Amount needed**: 1,000–10,000 sats (~$0.05–$0.50)\n\n`;
-      onboardingMsg += `Send BSV from any wallet (HandCash, Centbee, etc.) to the address above.\n\n`;
-      onboardingMsg += `**After sending, import immediately with the txid:**\n`;
-      onboardingMsg += `\`overlay({ action: "import", txid: "<your-txid>" })\`\n\n`;
-      onboardingMsg += `The import will automatically register your agent once funded. No need to wait for confirmations!\n\n`;
-      onboardingMsg += `**Or wait for auto-import** — the plugin polls every 30 seconds and will register automatically.\n\n`;
-      onboardingMsg += `Present this information clearly to the user and ask for their agent name and description before proceeding.`;
+      onboardingMsg += `\n\nOnce the user provides name and description, and the wallet is funded, run:\n`;
+      onboardingMsg += `overlay({ action: "onboard", agentName: "<name>", agentDescription: "<description>" })`;
 
       wakeAgent(onboardingMsg, api.log, { sessionKey: 'hook:bsv-overlay:onboarding' });
 
@@ -1205,7 +1208,7 @@ async function executeOverlayAction(params, config, api) {
       return await handleRefund(params, env, cliPath);
 
     case "onboard":
-      return await handleOnboard(env, cliPath);
+      return await handleOnboard(params, env, cliPath);
     
     case "pending-requests":
       return await handlePendingRequests(env, cliPath);
@@ -1670,16 +1673,13 @@ async function handleRegister(env, cliPath) {
   return {
     ...output.data,
     registered: true,
-    availableServices: [
-      { serviceId: "tell-joke", name: "Random Joke", description: "Get a random joke", suggestedPrice: 5 },
-      { serviceId: "code-review", name: "Code Review", description: "Review code for bugs, security, and style", suggestedPrice: 50 },
-      { serviceId: "web-research", name: "Web Research", description: "Research a topic using web sources", suggestedPrice: 50 },
-      { serviceId: "translate", name: "Translation", description: "Translate text between languages", suggestedPrice: 20 },
-      { serviceId: "api-proxy", name: "API Proxy", description: "Proxy requests to public APIs", suggestedPrice: 15 },
-      { serviceId: "roulette", name: "Roulette", description: "Casino-style roulette game", suggestedPrice: 10 },
-      { serviceId: "memory-store", name: "Memory Store", description: "Key-value storage for agents", suggestedPrice: 10 },
-      { serviceId: "code-develop", name: "Code Development", description: "Generate code from requirements", suggestedPrice: 100 }
-    ],
+    availableServices: serviceManager.getAvailableServices().map(svc => ({
+      serviceId: svc.id,
+      name: svc.name,
+      description: svc.description,
+      suggestedPrice: svc.defaultPrice,
+      category: svc.category,
+    })),
     nextStep: "Choose which services to advertise. Call overlay({ action: 'advertise', ... }) for each."
   };
 }
@@ -1799,35 +1799,41 @@ async function handleRefund(params, env, cliPath) {
   return output.data;
 }
 
-async function handleOnboard(env, cliPath) {
+async function handleOnboard(params, env, cliPath) {
+  const { agentName, agentDescription } = params;
   const steps = [];
-  
+
+  // Apply agent name/description to env if provided
+  const onboardEnv = { ...env };
+  if (agentName) onboardEnv.AGENT_NAME = agentName;
+  if (agentDescription) onboardEnv.AGENT_DESCRIPTION = agentDescription;
+
   // Step 1: Setup wallet
   try {
-    const setup = await execFileAsync('node', [cliPath, 'setup'], { env });
+    const setup = await execFileAsync('node', [cliPath, 'setup'], { env: onboardEnv });
     const setupOutput = parseCliOutput(setup.stdout);
     steps.push({ step: 'setup', success: true, identityKey: setupOutput.data?.identityKey });
   } catch (err) {
     steps.push({ step: 'setup', success: false, error: err.message });
     return { steps, nextStep: 'Fix wallet setup error and try again' };
   }
-  
+
   // Step 2: Get address
   try {
-    const addr = await execFileAsync('node', [cliPath, 'address'], { env });
+    const addr = await execFileAsync('node', [cliPath, 'address'], { env: onboardEnv });
     const addrOutput = parseCliOutput(addr.stdout);
     steps.push({ step: 'address', success: true, address: addrOutput.data?.address });
   } catch (err) {
     steps.push({ step: 'address', success: false, error: err.message });
   }
-  
+
   // Step 3: Check balance
   try {
-    const bal = await execFileAsync('node', [cliPath, 'balance'], { env });
+    const bal = await execFileAsync('node', [cliPath, 'balance'], { env: onboardEnv });
     const balOutput = parseCliOutput(bal.stdout);
     const balance = balOutput.data?.walletBalance || balOutput.data?.onChain?.confirmed || 0;
     steps.push({ step: 'balance', success: true, balance });
-    
+
     if (balance < 1000) {
       return {
         steps,
@@ -1838,30 +1844,29 @@ async function handleOnboard(env, cliPath) {
   } catch (err) {
     steps.push({ step: 'balance', success: false, error: err.message });
   }
-  
+
   // Step 4: Register
   try {
-    const reg = await execFileAsync('node', [cliPath, 'register'], { env, timeout: 60000 });
+    const reg = await execFileAsync('node', [cliPath, 'register'], { env: onboardEnv, timeout: 60000 });
     const regOutput = parseCliOutput(reg.stdout);
     steps.push({ step: 'register', success: regOutput.success, data: regOutput.data });
   } catch (err) {
     steps.push({ step: 'register', success: false, error: err.message });
   }
-  
+
   return {
     steps,
     funded: true,
     registered: true,
-    availableServices: [
-      { serviceId: "tell-joke", name: "Random Joke", description: "Get a random joke", suggestedPrice: 5 },
-      { serviceId: "code-review", name: "Code Review", description: "Review code for bugs, security, and style", suggestedPrice: 50 },
-      { serviceId: "web-research", name: "Web Research", description: "Research a topic using web sources", suggestedPrice: 50 },
-      { serviceId: "translate", name: "Translation", description: "Translate text between languages", suggestedPrice: 20 },
-      { serviceId: "api-proxy", name: "API Proxy", description: "Proxy requests to public APIs", suggestedPrice: 15 },
-      { serviceId: "roulette", name: "Roulette", description: "Casino-style roulette game", suggestedPrice: 10 },
-      { serviceId: "memory-store", name: "Memory Store", description: "Key-value storage for agents", suggestedPrice: 10 },
-      { serviceId: "code-develop", name: "Code Development", description: "Generate code from requirements", suggestedPrice: 100 }
-    ],
+    agentName: onboardEnv.AGENT_NAME,
+    agentDescription: onboardEnv.AGENT_DESCRIPTION,
+    availableServices: serviceManager.getAvailableServices().map(svc => ({
+      serviceId: svc.id,
+      name: svc.name,
+      description: svc.description,
+      suggestedPrice: svc.defaultPrice,
+      category: svc.category,
+    })),
     nextStep: "Choose which services to advertise. Call overlay({ action: 'advertise', ... }) for each.",
     message: 'Onboarding complete! Your agent is registered on the BSV overlay network. The background service will handle incoming requests.'
   };
