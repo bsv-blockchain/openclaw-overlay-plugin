@@ -151,7 +151,8 @@ export async function cmdUnregister(): Promise<never> {
     tempTx.addInput({
       unlockingScriptTemplate,
       sourceOutputIndex,
-      sourceTransaction
+      sourceTransaction,
+      sourceTXID: txid  // Must set explicitly for createAction to find in BEEF
     })
   })
   tempTx.addOutput({
