@@ -9,7 +9,6 @@ import { Beef, Utils } from '@bsv/sdk';
 import { randomBytesBase64, ScriptTemplateBRC29 } from '@bsv/wallet-toolbox';
 import type { SetupWallet } from '@bsv/wallet-toolbox';
 import type { PaymentParams, PaymentResult } from './types.js';
-import type { CachedKeyDeriver } from '@bsv/sdk';
 
 /**
  * Build a BRC-29 payment transaction using the wallet's createAction API.
@@ -30,7 +29,7 @@ export async function buildPayment(
   const derivationSuffix = randomBytesBase64(8);
 
   // Build BRC-29 locking script
-  const keyDeriver = setup.keyDeriver as CachedKeyDeriver;
+  const keyDeriver = setup.keyDeriver;
   const t = new ScriptTemplateBRC29({
     derivationPrefix,
     derivationSuffix,

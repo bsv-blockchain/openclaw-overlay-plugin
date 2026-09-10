@@ -23,11 +23,12 @@
     "postinstall": "node -e \"try{require('better-sqlite3')}catch{console.log('Note: better-sqlite3 requires build tools. If install failed, ensure python3 and a C++ compiler are available.')}\""
   },
   "dependencies": {
-    "@bsv/sdk": "^1.10.3",
-    "@bsv/wallet-toolbox": "^1.7.22",
+    "@bsv/sdk": "^2.5.0",
+    "@bsv/wallet-toolbox": "^2.12.0",
     "better-sqlite3": "^11.0.0",
     "dotenv": "^17.2.3",
-    "knex": "^3.1.0"
+    "knex": "^3.1.0",
+    "sqlite3": "^6.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.19.7",
@@ -42,6 +43,7 @@
     "ws": "^8.19.0"
   },
   "overrides": {
+    "@bsv/sdk": "$@bsv/sdk",
     "tar": "^7.5.7"
   },
   "repository": {
@@ -60,7 +62,7 @@
   "author": "Galt TR",
   "license": "MIT",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "clawdbot": {
     "extensions": [

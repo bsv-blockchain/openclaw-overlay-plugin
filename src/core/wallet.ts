@@ -6,7 +6,7 @@
  * minimal API surface designed for automated agent use.
  */
 
-import { PrivateKey, CachedKeyDeriver } from '@bsv/sdk';
+import { createRequire } from 'node:module';
 import {
   Wallet,
   WalletStorageManager,
@@ -34,6 +34,11 @@ import type {
 import { toChain, DEFAULT_TAAL_API_KEYS, DEFAULT_DB_NAME } from './config.js';
 import { buildPayment } from './payment.js';
 import { verifyPayment, acceptPayment } from './verify.js';
+
+// wallet-toolbox is currently CommonJS and resolves the SDK's CommonJS export.
+// Construct its key objects from the same export so class-private SDK types and
+// runtime identity stay aligned under NodeNext.
+const { PrivateKey, CachedKeyDeriver } = createRequire(import.meta.url)('@bsv/sdk');
 
 /** Filename for the persisted wallet identity JSON. */
 const IDENTITY_FILE = 'wallet-identity.json';
