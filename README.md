@@ -403,4 +403,4 @@ Provider can refund using `baemail-refund <requestId>` which sends the sats back
 
 ## License
 
-MIT
+Apache License 2.0. See [LICENSE](LICENSE).

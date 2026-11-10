@@ -4,6 +4,8 @@
   "description": "Clawdbot BSV Overlay — agent discovery, service marketplace, and micropayments on the BSV blockchain",
   "type": "module",
   "files": [
+    "LICENSE",
+    "NOTICE",
     "index.ts",
     "clawdbot.plugin.json",
     "openclaw.plugin.json",
@@ -58,7 +60,7 @@
     "agent"
   ],
   "author": "Galt TR",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=20.0.0"
   },
