@@ -5,6 +5,7 @@
   "type": "module",
   "files": [
     "LICENSE",
+    "PATENTS",
     "NOTICE",
     "index.ts",
     "clawdbot.plugin.json",
